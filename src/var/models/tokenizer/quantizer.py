@@ -49,5 +49,5 @@ class VectorQuantizer(nn.Module):
         commit_loss = F.mse_loss(z, z_q.detach())
         vq_loss = codebook_loss + self.beta * commit_loss
 
-        z_q = z + (z_q - z).detach()
+        z_q = z + (z_q - z).detach() # this trick lets encoder receive gradients
         return z_q, idx.view(b, h, w), vq_loss
