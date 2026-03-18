@@ -1,4 +1,4 @@
-name: vqvae_ffhq
+name: vqvae_base # 256px images
 
 model:
   vocab_size: 4096
@@ -11,14 +11,3 @@ model:
   quant_resi: 0.5
   share_quant_resi: 4
   patch_nums: [1, 2, 4, 8, 16]
-
-train:
-  epochs: 200
-  lr: 1.0e-4
-  weight_decay: 0.0
-  betas: [0.9, 0.95]
-  grad_clip: 1.0
-  amp: true
-  log_every: 100
-  eval_every: 1
-  save_every: 1
