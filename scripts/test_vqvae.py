@@ -41,7 +41,7 @@ def main():
     parser.add_argument("--quantizer-type", type=str, default="multi", choices=["single", "multi"])
     parser.add_argument("--patch-nums", type=int, nargs="+", default=[1, 2, 4, 8, 16])
     parser.add_argument("--device", type=str, default="cuda" if torch.cuda.is_available() else "cpu")
-    parser.add_argument("--save-path", type=str, default="recon2.png")
+    parser.add_argument("--save-path", type=str, default="experiments/recon2.png")
     args = parser.parse_args()
 
     device = torch.device(args.device)
