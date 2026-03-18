@@ -23,26 +23,6 @@ class MultiScaleQuantizer(nn.Module):
             using_znorm=using_znorm,
         )
 
-    def forward(self, z: torch.Tensor):
-        b, c, h, w = z.shape
-        f_rest = z
-        f_hat = torch.zeros_like(z)
-        ms_idx = []
-        vq_loss = 0.0
-
-        for i, pn in enumerate(self.patch_nums):
-            z_scale = F.interpolate(f_rest, size=(pn, pn), mode="area") if i < len(self.patch_nums) - 1 else f_rest
-            z_q_scale, idx, loss_i = self.quantizer(z_scale)
-            z_q = F.interpolate(z_q_scale, size=(h, w), mode="bicubic") if i < len(self.patch_nums) - 1 else z_q_scale
-
-            f_hat = f_hat + z_q
-            f_rest = f_rest - z_q
-            ms_idx.append(idx)
-            vq_loss = vq_loss + loss_i
-
-        vq_loss = vq_loss / len(self.patch_nums)
-        return f_hat, ms_idx, vq_loss
-
     def encode(self, z: torch.Tensor) -> list[torch.Tensor]:
         b, c, h, w = z.shape
         f_rest = z
@@ -73,3 +53,23 @@ class MultiScaleQuantizer(nn.Module):
             f_hat = f_hat + z_q
 
         return f_hat
+    
+    def forward(self, z: torch.Tensor):
+        b, c, h, w = z.shape
+        f_rest = z
+        f_hat = torch.zeros_like(z)
+        ms_idx = []
+        vq_loss = 0.0
+
+        for i, pn in enumerate(self.patch_nums):
+            z_scale = F.interpolate(f_rest, size=(pn, pn), mode="area") if i < len(self.patch_nums) - 1 else f_rest
+            z_q_scale, idx, loss_i = self.quantizer(z_scale)
+            z_q = F.interpolate(z_q_scale, size=(h, w), mode="bicubic") if i < len(self.patch_nums) - 1 else z_q_scale
+
+            f_hat = f_hat + z_q
+            f_rest = f_rest - z_q
+            ms_idx.append(idx)
+            vq_loss = vq_loss + loss_i
+
+        vq_loss = vq_loss / len(self.patch_nums)
+        return f_hat, ms_idx, vq_loss
