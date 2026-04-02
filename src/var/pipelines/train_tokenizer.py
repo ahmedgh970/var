@@ -1,9 +1,14 @@
+import os
 from pathlib import Path
 
 import hydra
 import torch
+import torch.distributed as dist
+from hydra.core.hydra_config import HydraConfig
 from omegaconf import DictConfig
+from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.data import DataLoader
+from torch.utils.data.distributed import DistributedSampler
 
 from var.datasets.image_dataset import build_image_datasets
 from var.models.tokenizer.vqvae import VQVAE
@@ -17,8 +22,22 @@ def set_seed(seed: int):
     torch.cuda.manual_seed_all(seed)
 
 
-def build_dataloaders(cfg: DictConfig):
-    _, train_set, val_set = build_image_datasets(
+def init_distributed(device_type: str):
+    world_size = int(os.environ.get("WORLD_SIZE", "1"))
+    rank = int(os.environ.get("RANK", "0"))
+    local_rank = int(os.environ.get("LOCAL_RANK", "0"))
+
+    use_ddp = world_size > 1
+    if use_ddp:
+        backend = "nccl" if device_type == "cuda" else "gloo"
+        dist.init_process_group(backend=backend)
+        if device_type == "cuda":
+            torch.cuda.set_device(local_rank)
+    return use_ddp, rank, local_rank, world_size
+
+
+def build_dataloaders(cfg: DictConfig, use_ddp: bool):
+    train_set, val_set = build_image_datasets(
         data_root=cfg.datasets.data_root,
         image_size=cfg.datasets.image_size,
         hflip=cfg.datasets.hflip,
@@ -27,10 +46,14 @@ def build_dataloaders(cfg: DictConfig):
         val_subdir=cfg.datasets.val_subdir,
     )
 
+    train_sampler = DistributedSampler(train_set, shuffle=True) if use_ddp else None
+    val_sampler = DistributedSampler(val_set, shuffle=False) if use_ddp else None
+
     train_loader = DataLoader(
         train_set,
-        batch_size=cfg.datasets.batch_size,
-        shuffle=True,
+        batch_size=cfg.datasets.train_batch_size,
+        shuffle=train_sampler is None,
+        sampler=train_sampler,
         num_workers=cfg.datasets.num_workers,
         pin_memory=cfg.datasets.pin_memory,
         drop_last=cfg.datasets.drop_last,
@@ -39,6 +62,7 @@ def build_dataloaders(cfg: DictConfig):
         val_set,
         batch_size=cfg.datasets.eval_batch_size,
         shuffle=False,
+        sampler=val_sampler,
         num_workers=cfg.datasets.num_workers,
         pin_memory=cfg.datasets.pin_memory,
         drop_last=False,
@@ -47,38 +71,50 @@ def build_dataloaders(cfg: DictConfig):
 
 
 def build_model(cfg: DictConfig):
-    model_cfg = cfg.tokenizer.model
-    quantizer_type = model_cfg.get("quantizer_type", "multi")
+    tokenizer_cfg = cfg.tokenizer
 
     model = VQVAE(
-        vocab_size=model_cfg.vocab_size,
-        z_channels=model_cfg.z_channels,
-        ch=model_cfg.ch,
-        ch_mult=(1, 1, 2, 2, 4),
-        num_res_blocks=2,
-        dropout=model_cfg.dropout,
-        beta=model_cfg.beta,
-        using_znorm=model_cfg.using_znorm,
-        patch_nums=tuple(model_cfg.patch_nums),
-        quantizer_type=quantizer_type,
-        quant_conv_ks=model_cfg.quant_conv_ks,
+        vocab_size=tokenizer_cfg.vocab_size,
+        z_channels=tokenizer_cfg.z_channels,
+        ch=tokenizer_cfg.ch,
+        ch_mult=tuple(tokenizer_cfg.ch_mult),
+        num_res_blocks=tokenizer_cfg.num_res_blocks,
+        dropout=tokenizer_cfg.dropout,
+        beta=tokenizer_cfg.beta,
+        using_znorm=tokenizer_cfg.using_znorm,
+        patch_nums=tuple(tokenizer_cfg.patch_nums),
+        quantizer_type=tokenizer_cfg.quantizer_type,
+        quant_conv_ks=tokenizer_cfg.quant_conv_ks,
     )
     return model
 
 
 @hydra.main(version_base=None, config_path="../../../configs", config_name="train_tokenizer")
 def main(cfg: DictConfig):
-    set_seed(int(cfg.seed))
+    requested_device = cfg.device
+    if requested_device == "cuda" and not torch.cuda.is_available():
+        requested_device = "cpu"
+    use_ddp, rank, local_rank, _ = init_distributed(requested_device)
+    is_main_process = rank == 0
 
-    out_dir = Path(cfg.output_dir)
-    ckpt_dir = Path(cfg.checkpoint_dir)
-    out_dir.mkdir(parents=True, exist_ok=True)
-    ckpt_dir.mkdir(parents=True, exist_ok=True)
+    set_seed(int(cfg.seed) + rank)
 
-    train_loader, val_loader = build_dataloaders(cfg)
+    ckpt_dir = Path(HydraConfig.get().runtime.output_dir)
+    if is_main_process:
+        ckpt_dir.mkdir(parents=True, exist_ok=True)
+    log_file = ckpt_dir / "train.log"
+
+    train_loader, val_loader = build_dataloaders(cfg, use_ddp=use_ddp)
     model = build_model(cfg)
 
     train_cfg = cfg.train
+    device = requested_device
+    if device == "cuda":
+        device = f"cuda:{local_rank}" if use_ddp else "cuda"
+    model = model.to(device)
+    if use_ddp:
+        model = DDP(model, device_ids=[local_rank] if requested_device == "cuda" else None)
+
     optimizer = build_optimizer(
         model,
         lr=train_cfg.lr,
@@ -93,10 +129,6 @@ def main(cfg: DictConfig):
         min_lr_ratio=cfg.scheduler.min_lr_ratio,
     )
 
-    device = cfg.device
-    if device == "cuda" and not torch.cuda.is_available():
-        device = "cpu"
-
     trainer = TokenizerTrainer(
         model=model,
         optimizer=optimizer,
@@ -108,6 +140,8 @@ def main(cfg: DictConfig):
         vq_weight=cfg.trainer.vq_weight,
         loss_type=cfg.trainer.loss_type,
         save_dir=str(ckpt_dir),
+        log_file=str(log_file),
+        is_main_process=is_main_process,
     )
 
     trainer.fit(
@@ -117,6 +151,9 @@ def main(cfg: DictConfig):
         eval_every=train_cfg.eval_every,
         save_every=train_cfg.save_every,
     )
+    if use_ddp and dist.is_initialized():
+        dist.barrier()
+        dist.destroy_process_group()
 
 
 if __name__ == "__main__":

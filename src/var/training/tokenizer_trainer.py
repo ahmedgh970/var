@@ -1,6 +1,7 @@
 from pathlib import Path
 
 import torch
+import torch.distributed as dist
 from torch import nn
 from torch.cuda.amp import GradScaler, autocast
 from torch.utils.data import DataLoader
@@ -22,6 +23,8 @@ class TokenizerTrainer:
         vq_weight: float = 1.0,
         loss_type: str = "mse",
         save_dir: str = "checkpoints/tokenizer",
+        log_file: str | None = None,
+        is_main_process: bool = True,
     ):
         self.model = model
         self.optimizer = optimizer
@@ -34,9 +37,35 @@ class TokenizerTrainer:
         self.loss_type = loss_type
         self.save_dir = Path(save_dir)
         self.save_dir.mkdir(parents=True, exist_ok=True)
+        self.log_file = Path(log_file) if log_file is not None else None
+        self.is_main_process = is_main_process
         self.scaler = GradScaler(enabled=self.amp)
 
         self.model.to(self.device)
+
+    def _log(self, text: str):
+        if not self.is_main_process:
+            return
+        print(text)
+        if self.log_file is not None:
+            self.log_file.parent.mkdir(parents=True, exist_ok=True)
+            with self.log_file.open("a", encoding="utf-8") as f:
+                f.write(text + "\n")
+
+    def _unwrap_model(self):
+        return self.model.module if hasattr(self.model, "module") else self.model
+
+    def _sync_meters(self, total_meter: float, rec_meter: float, vq_meter: float, n: int):
+        if not dist.is_available() or not dist.is_initialized():
+            return total_meter, rec_meter, vq_meter, n
+
+        stats = torch.tensor(
+            [total_meter, rec_meter, vq_meter, float(n)],
+            device=self.device,
+            dtype=torch.float64,
+        )
+        dist.all_reduce(stats, op=dist.ReduceOp.SUM)
+        return float(stats[0].item()), float(stats[1].item()), float(stats[2].item()), int(stats[3].item())
 
     def _step(self, images: torch.Tensor):
         with autocast(enabled=self.amp):
@@ -58,7 +87,7 @@ class TokenizerTrainer:
         vq_meter = 0.0
         n = 0
 
-        pbar = tqdm(train_loader, desc=f"train {epoch}", leave=False)
+        pbar = tqdm(train_loader, desc=f"train {epoch}", leave=False, disable=not self.is_main_process)
         for batch in pbar:
             images = batch[0] if isinstance(batch, (tuple, list)) else batch
             images = images.to(self.device, non_blocking=True)
@@ -83,6 +112,7 @@ class TokenizerTrainer:
                 vq=f"{vq_meter / max(1, n):.4f}",
             )
 
+        total_meter, rec_meter, vq_meter, n = self._sync_meters(total_meter, rec_meter, vq_meter, n)
         return {
             "total": total_meter / max(1, n),
             "recon": rec_meter / max(1, n),
@@ -97,7 +127,7 @@ class TokenizerTrainer:
         vq_meter = 0.0
         n = 0
 
-        pbar = tqdm(val_loader, desc=f"val {epoch}", leave=False)
+        pbar = tqdm(val_loader, desc=f"val {epoch}", leave=False, disable=not self.is_main_process)
         for batch in pbar:
             images = batch[0] if isinstance(batch, (tuple, list)) else batch
             images = images.to(self.device, non_blocking=True)
@@ -109,6 +139,7 @@ class TokenizerTrainer:
             vq_meter += float(vq_loss.detach()) * bs
             n += bs
 
+        total_meter, rec_meter, vq_meter, n = self._sync_meters(total_meter, rec_meter, vq_meter, n)
         return {
             "total": total_meter / max(1, n),
             "recon": rec_meter / max(1, n),
@@ -116,9 +147,11 @@ class TokenizerTrainer:
         }
 
     def save_checkpoint(self, epoch: int, best: bool = False):
+        if not self.is_main_process:
+            return
         ckpt = {
             "epoch": epoch,
-            "model": self.model.state_dict(),
+            "model": self._unwrap_model().state_dict(),
             "optimizer": self.optimizer.state_dict(),
             "scheduler": None if self.scheduler is None else self.scheduler.state_dict(),
             "scaler": self.scaler.state_dict(),
@@ -137,8 +170,11 @@ class TokenizerTrainer:
         save_every: int = 1,
     ):
         best_val = float("inf")
+        best_epoch = -1
 
         for epoch in range(1, epochs + 1):
+            if hasattr(train_loader, "sampler") and hasattr(train_loader.sampler, "set_epoch"):
+                train_loader.sampler.set_epoch(epoch)
             train_stats = self.train_one_epoch(train_loader, epoch)
 
             val_stats = None
@@ -146,23 +182,32 @@ class TokenizerTrainer:
                 val_stats = self.evaluate(val_loader, epoch)
                 if val_stats["total"] < best_val:
                     best_val = val_stats["total"]
+                    best_epoch = epoch
                     self.save_checkpoint(epoch, best=True)
+                    self._log(
+                        f"[epoch {epoch}] new best: val_total={val_stats['total']:.4f} -> saved best.pt"
+                    )
+                else:
+                    self._log(
+                        f"[epoch {epoch}] no best update: val_total={val_stats['total']:.4f}, best={best_val:.4f} (epoch {best_epoch})"
+                    )
 
             if self.scheduler is not None:
                 self.scheduler.step()
 
             if save_every > 0 and epoch % save_every == 0:
                 self.save_checkpoint(epoch, best=False)
+                self._log(f"[epoch {epoch}] saved last.pt")
 
             if val_stats is None:
-                print(
+                self._log(
                     f"[epoch {epoch}] "
                     f"train total={train_stats['total']:.4f} "
                     f"recon={train_stats['recon']:.4f} "
                     f"vq={train_stats['vq']:.4f}"
                 )
             else:
-                print(
+                self._log(
                     f"[epoch {epoch}] "
                     f"train total={train_stats['total']:.4f} "
                     f"recon={train_stats['recon']:.4f} "

@@ -1,4 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-PYTHONPATH=src python -m var.pipelines.train_tokenizer "$@"
+NPROC_PER_NODE=${NPROC_PER_NODE:-1}
+MASTER_PORT=${MASTER_PORT:-29500}
+
+PYTHONPATH=src torchrun \
+  --standalone \
+  --nproc_per_node="${NPROC_PER_NODE}" \
+  --master_port="${MASTER_PORT}" \
+  -m var.pipelines.train_tokenizer "$@"
