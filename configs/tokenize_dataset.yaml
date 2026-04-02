@@ -1,0 +1,16 @@
+defaults:
+  - datasets: ffhq
+  - tokenizer: vqvae_base
+  - _self_
+
+seed: 42
+device: cuda
+
+checkpoint_path: /path/to/tokenizer_checkpoint.pt
+splits: [val]
+
+output_root: /data/tii/data/ffhq256_train_val/tokens
+
+hydra:
+  run:
+    dir: ${output_root}/${now:%Y-%m-%d_%H-%M-%S}
