@@ -5,9 +5,11 @@ defaults:
 
 seed: 42
 device: cuda
-
-output_dir: outputs
 checkpoint_dir: checkpoints/tokenizer
+
+hydra:
+  run:
+    dir: ${checkpoint_dir}/${now:%Y-%m-%d_%H-%M-%S}
 
 train:
   epochs: 200
@@ -17,7 +19,7 @@ train:
   grad_clip: 1.0
   amp: true
   eval_every: 1
-  save_every: 1
+  save_every: 5
 
 scheduler:
   name: none

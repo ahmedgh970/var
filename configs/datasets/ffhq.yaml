@@ -2,13 +2,11 @@ name: ffhq
 data_root: /data/tii/data/ffhq256_train_val
 train_subdir: train
 val_subdir: val
-
 image_size: 256
 mid_reso: 1.125
 hflip: true
-
-batch_size: 64
-eval_batch_size: 64
+train_batch_size: 24
+eval_batch_size: 24
 num_workers: 8
 pin_memory: true
 drop_last: true
