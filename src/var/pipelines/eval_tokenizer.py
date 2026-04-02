@@ -52,6 +52,18 @@ def build_model(cfg: DictConfig) -> VQVAE:
 def load_checkpoint(model: VQVAE, checkpoint_path: str):
     ckpt = torch.load(checkpoint_path, map_location="cpu")
     state = ckpt["model"] if isinstance(ckpt, dict) and "model" in ckpt else ckpt
+
+    model_keys = model.state_dict().keys()
+    has_single_key = "quantizer.embedding.weight" in state
+    has_multi_key = "quantizer.quantizer.embedding.weight" in state
+    expects_single = "quantizer.embedding.weight" in model_keys
+    expects_multi = "quantizer.quantizer.embedding.weight" in model_keys
+
+    if has_single_key and expects_multi:
+        state["quantizer.quantizer.embedding.weight"] = state.pop("quantizer.embedding.weight")
+    elif has_multi_key and expects_single:
+        state["quantizer.embedding.weight"] = state.pop("quantizer.quantizer.embedding.weight")
+
     model.load_state_dict(state)
 
 
@@ -77,7 +89,7 @@ def main(cfg: DictConfig):
     dataset = ImageDataset(root=split_root, transform=val_tf)
     loader = DataLoader(
         dataset,
-        batch_size=cfg.batch_size,
+        batch_size=cfg.datasets.test_batch_size,
         shuffle=False,
         num_workers=cfg.datasets.num_workers,
         pin_memory=cfg.datasets.pin_memory,

@@ -6,13 +6,13 @@ defaults:
 seed: 42
 device: cuda:0
 
-checkpoint_path: /path/to/tokenizer_checkpoint.pt
+checkpoint_path: /data/ahmed.ghorbel/projects/10-var/checkpoints/tokenizer/2026-04-02_17-23-18/best.pt
 amp: true   # enable mixed precision (autocast)
 recon_loss_type: mse
 
-num_save_images: 64
+num_save_images: 16
 
-output_root: outputs/tokenizer
+output_root: experiments/tokenizer
 
 hydra:
   run:
