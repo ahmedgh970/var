@@ -1,0 +1,19 @@
+defaults:
+  - datasets: ffhq
+  - tokenizer: vqvae_base
+  - _self_
+
+seed: 42
+device: cuda:0
+
+checkpoint_path: /path/to/tokenizer_checkpoint.pt
+amp: true   # enable mixed precision (autocast)
+recon_loss_type: mse
+
+num_save_images: 64
+
+output_root: outputs/tokenizer
+
+hydra:
+  run:
+    dir: ${output_root}/${now:%Y-%m-%d_%H-%M-%S}
