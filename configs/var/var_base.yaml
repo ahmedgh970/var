@@ -1,0 +1,8 @@
+name: var_base
+vocab_size: 4096
+patch_nums: [1, 2, 4, 8, 16]
+dim: 768
+depth: 12
+num_heads: 12
+mlp_ratio: 4.0
+dropout: 0.0
