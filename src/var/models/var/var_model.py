@@ -103,10 +103,8 @@ class VARModel(nn.Module):
         m = torch.tril(torch.ones(length, length, device=device, dtype=torch.bool))
         return m.view(1, 1, length, length)
 
-    def forward(self, ms_tokens: list[torch.Tensor]):
-        x, y, scale_x = self.build_inputs_targets(ms_tokens)
+    def forward_tokens(self, x: torch.Tensor, scale_x: torch.Tensor) -> torch.Tensor:
         b, l = x.shape
-
         tok = self.token_embed(x)
         pos = self.pos_embed[:, :l, :]
         scl = self.scale_embed(scale_x)
@@ -117,6 +115,11 @@ class VARModel(nn.Module):
             h = blk(h, attn_mask=mask)
         h = self.norm(h)
         logits = self.head(h)
+        return logits
+
+    def forward(self, ms_tokens: list[torch.Tensor]):
+        x, y, scale_x = self.build_inputs_targets(ms_tokens)
+        logits = self.forward_tokens(x, scale_x)
 
         loss = F.cross_entropy(logits.reshape(-1, self.vocab_size), y.reshape(-1))
         return logits, y, loss

@@ -121,9 +121,12 @@ class VARTrainer:
         epochs: int,
         eval_every: int = 1,
         save_every: int = 1,
+        early_stopping_patience: int = 0,
+        early_stopping_min_delta: float = 0.0,
     ):
         best_val = float("inf")
         best_epoch = -1
+        no_improve_count = 0
 
         for epoch in range(1, epochs + 1):
             if hasattr(train_loader, "sampler") and hasattr(train_loader.sampler, "set_epoch"):
@@ -133,12 +136,14 @@ class VARTrainer:
             val_stats = None
             if eval_every > 0 and epoch % eval_every == 0:
                 val_stats = self.evaluate(val_loader, epoch)
-                if val_stats["loss"] < best_val:
+                if val_stats["loss"] < (best_val - early_stopping_min_delta):
                     best_val = val_stats["loss"]
                     best_epoch = epoch
+                    no_improve_count = 0
                     self.save_checkpoint(epoch, best=True)
                     self._log(f"[epoch {epoch}] new best: val_loss={val_stats['loss']:.4f} -> saved best.pt")
                 else:
+                    no_improve_count += 1
                     self._log(
                         f"[epoch {epoch}] no best update: val_loss={val_stats['loss']:.4f}, best={best_val:.4f} (epoch {best_epoch})"
                     )
@@ -154,3 +159,10 @@ class VARTrainer:
                 self._log(f"[epoch {epoch}] train loss={train_stats['loss']:.4f}")
             else:
                 self._log(f"[epoch {epoch}] train loss={train_stats['loss']:.4f} | val loss={val_stats['loss']:.4f}")
+
+            if early_stopping_patience > 0 and val_stats is not None and no_improve_count >= early_stopping_patience:
+                self._log(
+                    f"[epoch {epoch}] early stopping triggered: no improvement for {no_improve_count} evals "
+                    f"(patience={early_stopping_patience}, min_delta={early_stopping_min_delta})"
+                )
+                break

@@ -35,16 +35,9 @@ class TokenDataset(Dataset):
 
 def build_token_datasets(
     token_root,
-    include_train: bool = True,
-    include_val: bool = True,
-    include_test: bool = False,
 ):
     token_root = Path(token_root)
     datasets = {}
-    if include_train:
-        datasets["train"] = TokenDataset(token_root / "train")
-    if include_val:
-        datasets["val"] = TokenDataset(token_root / "val")
-    if include_test:
-        datasets["test"] = TokenDataset(token_root / "test")
+    datasets["train"] = TokenDataset(token_root / "train")
+    datasets["val"] = TokenDataset(token_root / "val")
     return datasets

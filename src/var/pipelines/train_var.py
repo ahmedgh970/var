@@ -37,12 +37,7 @@ def init_distributed(device_type: str):
 
 
 def build_dataloaders(cfg: DictConfig, use_ddp: bool):
-    datasets = build_token_datasets(
-        token_root=cfg.tokens_root,
-        include_train=True,
-        include_val=True,
-        include_test=False,
-    )
+    datasets = build_token_datasets(token_root=cfg.tokens_root)
     train_set = datasets["train"]
     val_set = datasets["val"]
 
@@ -141,6 +136,8 @@ def main(cfg: DictConfig):
         epochs=train_cfg.epochs,
         eval_every=train_cfg.eval_every,
         save_every=train_cfg.save_every,
+        early_stopping_patience=train_cfg.early_stopping_patience,
+        early_stopping_min_delta=train_cfg.early_stopping_min_delta,
     )
 
     if use_ddp and dist.is_initialized():
