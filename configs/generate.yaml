@@ -1,0 +1,25 @@
+defaults:
+  - var: var_base
+  - tokenizer: vqvae_base
+  - _self_
+
+seed: 42
+device: cuda
+
+var_checkpoint_path: /path/to/var/best.pt
+tokenizer_checkpoint_path: /path/to/tokenizer/best.pt
+
+num_samples: 16
+batch_size: 8
+
+temperature: 1.0
+top_k: 0
+top_p: 1.0
+start_token: null
+sample_prefix: sample
+
+output_dir: experiments/var
+
+hydra:
+  run:
+    dir: ${output_dir}/${now:%Y-%m-%d_%H-%M-%S}
