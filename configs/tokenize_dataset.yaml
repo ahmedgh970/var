@@ -7,8 +7,10 @@ seed: 42
 device: cuda
 
 checkpoint_path: /path/to/tokenizer_checkpoint.pt
-splits: [val]
-
+splits: [train, val, test]
+batch_size: 16
+num_workers: 8
+pin_memory: true
 output_root: /data/tii/data/ffhq256_train_val/tokens
 
 hydra:

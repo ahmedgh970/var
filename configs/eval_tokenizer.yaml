@@ -9,7 +9,9 @@ device: cuda:0
 checkpoint_path: /data/ahmed.ghorbel/projects/10-var/checkpoints/tokenizer/2026-04-02_17-23-18/best.pt
 amp: true   # enable mixed precision (autocast)
 recon_loss_type: mse
-
+batch_size: 16
+num_workers: 8
+pin_memory: true
 num_save_images: 16
 
 output_root: experiments/tokenizer
