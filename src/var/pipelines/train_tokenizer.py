@@ -40,7 +40,7 @@ def build_dataloaders(cfg: DictConfig, use_ddp: bool):
     train_set, val_set = build_image_datasets(
         data_root=cfg.datasets.data_root,
         image_size=cfg.datasets.image_size,
-        hflip=cfg.datasets.hflip,
+        hflip=cfg.train.hflip,
         mid_reso=cfg.datasets.mid_reso,
         train_subdir=cfg.datasets.train_subdir,
         val_subdir=cfg.datasets.val_subdir,
@@ -51,20 +51,20 @@ def build_dataloaders(cfg: DictConfig, use_ddp: bool):
 
     train_loader = DataLoader(
         train_set,
-        batch_size=cfg.datasets.train_batch_size,
+        batch_size=cfg.train.batch_size,
         shuffle=train_sampler is None,
         sampler=train_sampler,
-        num_workers=cfg.datasets.num_workers,
-        pin_memory=cfg.datasets.pin_memory,
-        drop_last=cfg.datasets.drop_last,
+        num_workers=cfg.train.num_workers,
+        pin_memory=cfg.train.pin_memory,
+        drop_last=cfg.train.drop_last,
     )
     val_loader = DataLoader(
         val_set,
-        batch_size=cfg.datasets.eval_batch_size,
+        batch_size=cfg.train.eval_batch_size,
         shuffle=False,
         sampler=val_sampler,
-        num_workers=cfg.datasets.num_workers,
-        pin_memory=cfg.datasets.pin_memory,
+        num_workers=cfg.train.num_workers,
+        pin_memory=cfg.train.pin_memory,
         drop_last=False,
     )
     return train_loader, val_loader

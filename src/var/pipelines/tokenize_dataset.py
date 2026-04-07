@@ -69,10 +69,10 @@ def tokenize_split(
     dataset = ImageDataset(root=split_root, transform=transform)
     loader = DataLoader(
         dataset,
-        batch_size=cfg.datasets.test_batch_size,
+        batch_size=cfg.batch_size,
         shuffle=False,
-        num_workers=cfg.datasets.num_workers,
-        pin_memory=cfg.datasets.pin_memory,
+        num_workers=cfg.num_workers,
+        pin_memory=cfg.pin_memory,
         drop_last=False,
     )
 
