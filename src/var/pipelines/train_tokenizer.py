@@ -45,6 +45,10 @@ def build_dataloaders(cfg: DictConfig, use_ddp: bool):
         train_subdir=cfg.datasets.train_subdir,
         val_subdir=cfg.datasets.val_subdir,
     )
+    if len(train_set) == 0:
+        raise ValueError(f"Empty train dataset: {Path(cfg.datasets.data_root) / cfg.datasets.train_subdir}")
+    if len(val_set) == 0:
+        raise ValueError(f"Empty val dataset: {Path(cfg.datasets.data_root) / cfg.datasets.val_subdir}")
 
     train_sampler = DistributedSampler(train_set, shuffle=True) if use_ddp else None
     val_sampler = DistributedSampler(val_set, shuffle=False) if use_ddp else None
@@ -85,6 +89,9 @@ def build_model(cfg: DictConfig):
         patch_nums=tuple(tokenizer_cfg.patch_nums),
         quantizer_type=tokenizer_cfg.quantizer_type,
         quant_conv_ks=tokenizer_cfg.quant_conv_ks,
+        quant_resi=float(tokenizer_cfg.get("quant_resi", 0.5)),
+        share_quant_resi=int(tokenizer_cfg.get("share_quant_resi", 4)),
+        default_qresi_counts=int(tokenizer_cfg.get("default_qresi_counts", 0)),
     )
     return model
 

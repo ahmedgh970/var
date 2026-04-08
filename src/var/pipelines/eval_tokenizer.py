@@ -45,6 +45,9 @@ def build_model(cfg: DictConfig) -> VQVAE:
         patch_nums=tuple(tokenizer_cfg.patch_nums),
         quantizer_type=tokenizer_cfg.quantizer_type,
         quant_conv_ks=tokenizer_cfg.quant_conv_ks,
+        quant_resi=float(tokenizer_cfg.get("quant_resi", 0.5)),
+        share_quant_resi=int(tokenizer_cfg.get("share_quant_resi", 4)),
+        default_qresi_counts=int(tokenizer_cfg.get("default_qresi_counts", 0)),
     )
     return model
 

@@ -50,9 +50,19 @@ class VQVAE(nn.Module):
             using_mid_sa=True,
         )
 
+        # Pre-VQ latent adaptation.
         pad = quant_conv_ks // 2
-        self.quant_conv = nn.Conv2d(z_channels, z_channels, kernel_size=quant_conv_ks, stride=1, padding=pad)
-        self.post_quant_conv = nn.Conv2d(z_channels, z_channels, kernel_size=quant_conv_ks, stride=1, padding=pad)
+        self.quant_conv = nn.Conv2d(
+            z_channels, z_channels,
+            kernel_size=quant_conv_ks,
+            stride=1, padding=pad
+        )
+        # Post-VQ latent adaptation.
+        self.post_quant_conv = nn.Conv2d(
+            z_channels, z_channels, 
+            kernel_size=quant_conv_ks, 
+            stride=1, padding=pad
+        )
 
         if self.quantizer_type == "single":
             self.quantizer = VectorQuantizer(
