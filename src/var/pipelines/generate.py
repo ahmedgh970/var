@@ -44,6 +44,9 @@ def build_tokenizer(cfg: DictConfig) -> VQVAE:
         patch_nums=tuple(tok_cfg.patch_nums),
         quantizer_type=tok_cfg.quantizer_type,
         quant_conv_ks=tok_cfg.quant_conv_ks,
+        quant_resi=float(tok_cfg.get("quant_resi", 0.5)),
+        share_quant_resi=int(tok_cfg.get("share_quant_resi", 4)),
+        default_qresi_counts=int(tok_cfg.get("default_qresi_counts", 0)),
     )
 
 
