@@ -106,6 +106,7 @@ def main(cfg: DictConfig):
         bs = min(batch_size, num_samples - saved)
         ms_idx = generate_token_indices(
             model=var_model,
+            tokenizer=tokenizer,
             batch_size=bs,
             temperature=float(cfg.temperature),
             top_k=int(cfg.top_k),

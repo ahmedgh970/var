@@ -165,3 +165,16 @@ class VARModel(nn.Module):
         stage_idx: int,
     ) -> torch.Tensor:
         return self._forward_stage(prefix_tokens=prefix_tokens, stage_idx=stage_idx)
+
+    @torch.no_grad()
+    def sample_next_scale_with_var_input(
+        self,
+        cond_blc_wo_first_l: torch.Tensor | None,
+        batch_size: int,
+        stage_idx: int,
+    ) -> torch.Tensor:
+        return self._forward_stage_with_var_input(
+            cond_blc_wo_first_l=cond_blc_wo_first_l,
+            batch_size=batch_size,
+            stage_idx=stage_idx,
+        )
