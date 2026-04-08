@@ -11,6 +11,7 @@ from torch.utils.data import DataLoader
 from torch.utils.data.distributed import DistributedSampler
 
 from var.datasets.token_dataset import build_token_datasets
+from var.models.tokenizer.vqvae import VQVAE
 from var.models.var.var_model import VARModel
 from var.training.optim import build_optimizer
 from var.training.schedulers import build_scheduler
@@ -70,6 +71,7 @@ def build_model(cfg: DictConfig):
     model = VARModel(
         vocab_size=var_cfg.vocab_size,
         patch_nums=tuple(var_cfg.patch_nums),
+        cvae_dim=cfg.tokenizer.z_channels,
         dim=var_cfg.dim,
         depth=var_cfg.depth,
         num_heads=var_cfg.num_heads,
@@ -77,6 +79,44 @@ def build_model(cfg: DictConfig):
         dropout=var_cfg.dropout,
     )
     return model
+
+
+def build_tokenizer(cfg: DictConfig) -> VQVAE:
+    tok = cfg.tokenizer
+    return VQVAE(
+        vocab_size=tok.vocab_size,
+        z_channels=tok.z_channels,
+        ch=tok.ch,
+        ch_mult=tuple(tok.ch_mult),
+        num_res_blocks=tok.num_res_blocks,
+        dropout=tok.dropout,
+        beta=tok.beta,
+        using_znorm=tok.using_znorm,
+        patch_nums=tuple(tok.patch_nums),
+        quantizer_type=tok.quantizer_type,
+        quant_conv_ks=tok.quant_conv_ks,
+        quant_resi=float(tok.get("quant_resi", 0.5)),
+        share_quant_resi=int(tok.get("share_quant_resi", 4)),
+        default_qresi_counts=int(tok.get("default_qresi_counts", 0)),
+    )
+
+
+def load_tokenizer_checkpoint(model: VQVAE, checkpoint_path: str):
+    ckpt = torch.load(checkpoint_path, map_location="cpu")
+    state = ckpt["model"] if isinstance(ckpt, dict) and "model" in ckpt else ckpt
+
+    model_keys = model.state_dict().keys()
+    has_single_key = "quantizer.embedding.weight" in state
+    has_multi_key = "quantizer.quantizer.embedding.weight" in state
+    expects_single = "quantizer.embedding.weight" in model_keys
+    expects_multi = "quantizer.quantizer.embedding.weight" in model_keys
+
+    if has_single_key and expects_multi:
+        state["quantizer.quantizer.embedding.weight"] = state.pop("quantizer.embedding.weight")
+    elif has_multi_key and expects_single:
+        state["quantizer.embedding.weight"] = state.pop("quantizer.quantizer.embedding.weight")
+
+    model.load_state_dict(state, strict=True)
 
 
 @hydra.main(version_base=None, config_path="../../../configs", config_name="train_var")
@@ -95,10 +135,22 @@ def main(cfg: DictConfig):
 
     train_loader, val_loader = build_dataloaders(cfg, use_ddp=use_ddp)
     model = build_model(cfg)
+    tokenizer = None
 
     device = requested_device
     if device == "cuda":
         device = f"cuda:{local_rank}" if use_ddp else "cuda"
+
+    if not cfg.tokenizer_checkpoint_path:
+        raise ValueError(
+            "tokenizer_checkpoint_path is required for VAR training with idx_to_var_input conditioning."
+        )
+    tokenizer = build_tokenizer(cfg).to(device)
+    load_tokenizer_checkpoint(tokenizer, cfg.tokenizer_checkpoint_path)
+    tokenizer.eval()
+    for p in tokenizer.parameters():
+        p.requires_grad = False
+
     model = model.to(device)
     if use_ddp:
         model = DDP(model, device_ids=[local_rank] if requested_device == "cuda" else None)
@@ -120,6 +172,7 @@ def main(cfg: DictConfig):
 
     trainer = VARTrainer(
         model=model,
+        tokenizer=tokenizer,
         optimizer=optimizer,
         scheduler=scheduler,
         device=device,

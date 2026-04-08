@@ -12,6 +12,7 @@ class VARTrainer:
     def __init__(
         self,
         model: nn.Module,
+        tokenizer: nn.Module | None,
         optimizer,
         scheduler=None,
         device: str = "cuda",
@@ -22,6 +23,7 @@ class VARTrainer:
         is_main_process: bool = True,
     ):
         self.model = model
+        self.tokenizer = tokenizer
         self.optimizer = optimizer
         self.scheduler = scheduler
         self.device = torch.device(device)
@@ -33,6 +35,9 @@ class VARTrainer:
         self.is_main_process = is_main_process
         self.scaler = GradScaler(enabled=self.amp)
         self.model.to(self.device)
+        if self.tokenizer is not None:
+            self.tokenizer.to(self.device)
+            self.tokenizer.eval()
 
     def _unwrap_model(self):
         return self.model.module if hasattr(self.model, "module") else self.model
@@ -54,8 +59,12 @@ class VARTrainer:
         return float(t[0].item()), int(t[1].item())
 
     def _step(self, ms_tokens: list[torch.Tensor]):
+        cond = None
+        if self.tokenizer is not None:
+            with torch.no_grad():
+                cond = self.tokenizer.idx_to_var_input(ms_tokens)
         with autocast(enabled=self.amp):
-            _, _, loss = self.model(ms_tokens)
+            _, _, loss = self.model(ms_tokens, cond_blc_wo_first_l=cond)
         return loss
 
     def train_one_epoch(self, train_loader: DataLoader, epoch: int):
