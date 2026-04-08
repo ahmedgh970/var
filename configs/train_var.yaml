@@ -1,5 +1,6 @@
 defaults:
   - var: var_base
+  - tokenizer: vqvae_base
   - _self_
 
 seed: 42
@@ -7,6 +8,7 @@ device: cuda
 
 tokens_root: /data/tii/data/ffhq256_train_val/tokens/multi
 checkpoint_dir: checkpoints/var
+tokenizer_checkpoint_path: ""
 
 hydra:
   run:

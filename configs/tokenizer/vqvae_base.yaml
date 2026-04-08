@@ -1,12 +1,15 @@
 name: vqvae_base # 256px images
-quantizer_type: single   # or single
+quantizer_type: multi   # or single
 vocab_size: 4096
 z_channels: 32
-ch: 128
+ch: 160
 ch_mult: [1, 1, 2, 2, 4]
 num_res_blocks: 2
 dropout: 0.0
 beta: 0.25
 using_znorm: false
 quant_conv_ks: 3
+quant_resi: 0.5
+share_quant_resi: 4
+default_qresi_counts: 0
 patch_nums: [1, 2, 4, 8, 16]

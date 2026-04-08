@@ -20,6 +20,7 @@ dependencies = [
   "pyyaml>=6.0",
   "requests>=2.14.0",
   "pyjwt[crypto]>=2.4.0",
+  "matplotlib",
 ]
 
 [project.optional-dependencies]
