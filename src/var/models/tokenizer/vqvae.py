@@ -21,6 +21,9 @@ class VQVAE(nn.Module):
         patch_nums: tuple[int, ...] = (1, 2, 4, 8, 16),
         quantizer_type: str = "multi",
         quant_conv_ks: int = 3,
+        quant_resi: float = 0.5,
+        share_quant_resi: int = 4,
+        default_qresi_counts: int = 0,
     ):
         super().__init__()
         self.quantizer_type = quantizer_type
@@ -65,6 +68,9 @@ class VQVAE(nn.Module):
                 beta=beta,
                 using_znorm=using_znorm,
                 patch_nums=self.patch_nums,
+                quant_resi=quant_resi,
+                share_quant_resi=share_quant_resi,
+                default_qresi_counts=default_qresi_counts,
             )
 
     def encode_latent(self, x: torch.Tensor) -> torch.Tensor:
@@ -97,3 +103,19 @@ class VQVAE(nn.Module):
         else:
             z_q = self.quantizer.decode(ms_idx)
         return self.decode_latent(z_q)
+
+    def idx_to_var_input(self, ms_idx: list[torch.Tensor]) -> torch.Tensor | None:
+        if self.quantizer_type == "single":
+            return None
+        return self.quantizer.idx_to_var_input(ms_idx)
+
+    def get_next_autoregressive_input(
+        self,
+        si: int,
+        sn: int,
+        f_hat: torch.Tensor,
+        h_bchw: torch.Tensor,
+    ):
+        if self.quantizer_type == "single":
+            return f_hat + h_bchw, f_hat + h_bchw
+        return self.quantizer.get_next_autoregressive_input(si=si, sn=sn, f_hat=f_hat, h_bchw=h_bchw)
