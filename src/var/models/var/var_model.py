@@ -28,11 +28,9 @@ class VARModel(nn.Module):
             self.begin_ends.append((cur, cur + pn * pn))
             cur += pn * pn
 
-        self.token_embed = nn.Embedding(vocab_size, dim)
         self.word_embed = nn.Linear(cvae_dim, dim)
         self.pos_embed = nn.Parameter(torch.zeros(1, self.seq_len, dim))
         self.scale_embed = nn.Embedding(self.num_scales, dim)
-        self.stage_query = nn.Embedding(self.num_scales, dim)
         self.pos_start = nn.Parameter(torch.zeros(1, self.first_l, dim))
 
         self.blocks = nn.ModuleList(
@@ -53,41 +51,9 @@ class VARModel(nn.Module):
         attn_mask = (d >= d_t).view(1, 1, self.seq_len, self.seq_len)
         self.register_buffer("attn_mask", attn_mask)
 
-    def _flatten_scales(self, ms_tokens: list[torch.Tensor]) -> list[torch.Tensor]:
-        return [t.view(t.shape[0], -1) for t in ms_tokens]
-
-    def _forward_stage(self, prefix_tokens: torch.Tensor, stage_idx: int) -> torch.Tensor:
-        b = prefix_tokens.shape[0]
-        bg, ed = self.begin_ends[stage_idx]
-        n_stage = ed - bg
-
-        if bg > 0:
-            prefix_h = (
-                self.token_embed(prefix_tokens)
-                + self.pos_embed[:, :bg, :]
-                + self.scale_embed(self.lvl_1l[:bg]).unsqueeze(0)
-            )
-        else:
-            prefix_h = self.pos_embed[:, :0, :].expand(b, 0, -1)
-
-        stage_h = (
-            self.stage_query.weight[stage_idx].view(1, 1, -1).expand(b, n_stage, -1)
-            + self.pos_embed[:, bg:ed, :]
-            + self.scale_embed(self.lvl_1l[bg:ed]).unsqueeze(0)
-        )
-
-        h = torch.cat([prefix_h, stage_h], dim=1)
-        mask = self.attn_mask[:, :, :ed, :ed]
-
-        for blk in self.blocks:
-            h = blk(h, attn_mask=mask)
-        h = self.norm(h)
-        logits = self.head(h[:, bg:ed, :])
-        return logits
-
     def _forward_stage_with_var_input(
         self,
-        cond_blc_wo_first_l: torch.Tensor | None,
+        cond_blc_wo_first_l: torch.Tensor,
         batch_size: int,
         stage_idx: int,
     ) -> torch.Tensor:
@@ -121,26 +87,21 @@ class VARModel(nn.Module):
     def forward(
         self,
         ms_tokens: list[torch.Tensor],
-        cond_blc_wo_first_l: torch.Tensor | None = None,
+        cond_blc_wo_first_l: torch.Tensor,
     ):
-        flat_scales = self._flatten_scales(ms_tokens)
+        flat_scales = [t.view(t.shape[0], -1) for t in ms_tokens]
         b = flat_scales[0].shape[0]
-
-        prefix_tokens = flat_scales[0].new_zeros((b, 0), dtype=torch.long)
         logits_per_stage = []
         targets_per_stage = []
         loss_sum = 0.0
         num_tokens = 0
 
         for si, target in enumerate(flat_scales):
-            if cond_blc_wo_first_l is None:
-                logits = self._forward_stage(prefix_tokens=prefix_tokens, stage_idx=si)
-            else:
-                logits = self._forward_stage_with_var_input(
-                    cond_blc_wo_first_l=cond_blc_wo_first_l,
-                    batch_size=b,
-                    stage_idx=si,
-                )
+            logits = self._forward_stage_with_var_input(
+                cond_blc_wo_first_l=cond_blc_wo_first_l,
+                batch_size=b,
+                stage_idx=si,
+            )
             logits_per_stage.append(logits)
             targets_per_stage.append(target)
 
@@ -151,20 +112,10 @@ class VARModel(nn.Module):
             )
             num_tokens += target.numel()
 
-            prefix_tokens = torch.cat([prefix_tokens, target], dim=1)
-
         logits_cat = torch.cat(logits_per_stage, dim=1)
         targets_cat = torch.cat(targets_per_stage, dim=1)
         loss = loss_sum / max(1, num_tokens)
         return logits_cat, targets_cat, loss
-
-    @torch.no_grad()
-    def sample_next_scale(
-        self,
-        prefix_tokens: torch.Tensor,
-        stage_idx: int,
-    ) -> torch.Tensor:
-        return self._forward_stage(prefix_tokens=prefix_tokens, stage_idx=stage_idx)
 
     @torch.no_grad()
     def sample_next_scale_with_var_input(
@@ -173,6 +124,8 @@ class VARModel(nn.Module):
         batch_size: int,
         stage_idx: int,
     ) -> torch.Tensor:
+        if cond_blc_wo_first_l is None and stage_idx > 0:
+            raise ValueError("cond_blc_wo_first_l is required for stages after the first one")
         return self._forward_stage_with_var_input(
             cond_blc_wo_first_l=cond_blc_wo_first_l,
             batch_size=batch_size,
