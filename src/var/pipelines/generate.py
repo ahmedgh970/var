@@ -8,6 +8,7 @@ from omegaconf import DictConfig
 
 from var.inference.decode import decode_indices_to_images, save_images
 from var.inference.generator import generate_token_indices
+from var.models.tokenizer.checkpoint import load_tokenizer_checkpoint
 from var.models.tokenizer.vqvae import VQVAE
 from var.models.var.var_model import VARModel
 
@@ -21,7 +22,7 @@ def build_var_model(cfg: DictConfig) -> VARModel:
     var_cfg = cfg.var
     return VARModel(
         vocab_size=var_cfg.vocab_size,
-        patch_nums=tuple(var_cfg.patch_nums),
+        patch_nums=tuple(cfg.tokenizer.patch_nums),
         dim=var_cfg.dim,
         depth=var_cfg.depth,
         num_heads=var_cfg.num_heads,
@@ -56,24 +57,6 @@ def _load_state_dict_raw(model, checkpoint_path: str):
     model.load_state_dict(state)
 
 
-def _load_tokenizer_checkpoint(model: VQVAE, checkpoint_path: str):
-    ckpt = torch.load(checkpoint_path, map_location="cpu")
-    state = ckpt["model"] if isinstance(ckpt, dict) and "model" in ckpt else ckpt
-
-    model_keys = model.state_dict().keys()
-    has_single_key = "quantizer.embedding.weight" in state
-    has_multi_key = "quantizer.quantizer.embedding.weight" in state
-    expects_single = "quantizer.embedding.weight" in model_keys
-    expects_multi = "quantizer.quantizer.embedding.weight" in model_keys
-
-    if has_single_key and expects_multi:
-        state["quantizer.quantizer.embedding.weight"] = state.pop("quantizer.embedding.weight")
-    elif has_multi_key and expects_single:
-        state["quantizer.embedding.weight"] = state.pop("quantizer.quantizer.embedding.weight")
-
-    model.load_state_dict(state)
-
-
 @hydra.main(version_base=None, config_path="../../../configs", config_name="generate")
 def main(cfg: DictConfig):
     set_seed(int(cfg.seed))
@@ -92,7 +75,7 @@ def main(cfg: DictConfig):
     tokenizer = build_tokenizer(cfg).to(device)
 
     _load_state_dict_raw(var_model, cfg.var_checkpoint_path)
-    _load_tokenizer_checkpoint(tokenizer, cfg.tokenizer_checkpoint_path)
+    load_tokenizer_checkpoint(tokenizer, cfg.tokenizer_checkpoint_path)
 
     var_model.eval()
     tokenizer.eval()

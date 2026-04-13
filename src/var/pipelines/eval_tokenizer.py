@@ -10,6 +10,7 @@ from torch.utils.data import DataLoader
 
 from var.datasets.image_dataset import ImageDataset
 from var.datasets.transforms import build_val_transform
+from var.models.tokenizer.checkpoint import load_tokenizer_checkpoint
 from var.models.tokenizer.vqvae import VQVAE
 from var.training.losses import reconstruction_loss
 
@@ -52,24 +53,6 @@ def build_model(cfg: DictConfig) -> VQVAE:
     return model
 
 
-def load_checkpoint(model: VQVAE, checkpoint_path: str):
-    ckpt = torch.load(checkpoint_path, map_location="cpu")
-    state = ckpt["model"] if isinstance(ckpt, dict) and "model" in ckpt else ckpt
-
-    model_keys = model.state_dict().keys()
-    has_single_key = "quantizer.embedding.weight" in state
-    has_multi_key = "quantizer.quantizer.embedding.weight" in state
-    expects_single = "quantizer.embedding.weight" in model_keys
-    expects_multi = "quantizer.quantizer.embedding.weight" in model_keys
-
-    if has_single_key and expects_multi:
-        state["quantizer.quantizer.embedding.weight"] = state.pop("quantizer.embedding.weight")
-    elif has_multi_key and expects_single:
-        state["quantizer.embedding.weight"] = state.pop("quantizer.quantizer.embedding.weight")
-
-    model.load_state_dict(state)
-
-
 @hydra.main(version_base=None, config_path="../../../configs", config_name="eval_tokenizer")
 def main(cfg: DictConfig):
     set_seed(int(cfg.seed))
@@ -101,7 +84,7 @@ def main(cfg: DictConfig):
     )
 
     model = build_model(cfg).to(device)
-    load_checkpoint(model, cfg.checkpoint_path)
+    load_tokenizer_checkpoint(model, cfg.checkpoint_path)
     model.eval()
 
     rec_meter = 0.0

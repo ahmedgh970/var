@@ -11,6 +11,7 @@ from torch.utils.data import DataLoader
 from torch.utils.data.distributed import DistributedSampler
 
 from var.datasets.token_dataset import build_token_datasets
+from var.models.tokenizer.checkpoint import load_tokenizer_checkpoint
 from var.models.tokenizer.vqvae import VQVAE
 from var.models.var.var_model import VARModel
 from var.training.optim import build_optimizer
@@ -70,7 +71,7 @@ def build_model(cfg: DictConfig):
     var_cfg = cfg.var
     model = VARModel(
         vocab_size=var_cfg.vocab_size,
-        patch_nums=tuple(var_cfg.patch_nums),
+        patch_nums=tuple(cfg.tokenizer.patch_nums),
         cvae_dim=cfg.tokenizer.z_channels,
         dim=var_cfg.dim,
         depth=var_cfg.depth,
@@ -99,24 +100,6 @@ def build_tokenizer(cfg: DictConfig) -> VQVAE:
         share_quant_resi=int(tok.get("share_quant_resi", 4)),
         default_qresi_counts=int(tok.get("default_qresi_counts", 0)),
     )
-
-
-def load_tokenizer_checkpoint(model: VQVAE, checkpoint_path: str):
-    ckpt = torch.load(checkpoint_path, map_location="cpu")
-    state = ckpt["model"] if isinstance(ckpt, dict) and "model" in ckpt else ckpt
-
-    model_keys = model.state_dict().keys()
-    has_single_key = "quantizer.embedding.weight" in state
-    has_multi_key = "quantizer.quantizer.embedding.weight" in state
-    expects_single = "quantizer.embedding.weight" in model_keys
-    expects_multi = "quantizer.quantizer.embedding.weight" in model_keys
-
-    if has_single_key and expects_multi:
-        state["quantizer.quantizer.embedding.weight"] = state.pop("quantizer.embedding.weight")
-    elif has_multi_key and expects_single:
-        state["quantizer.embedding.weight"] = state.pop("quantizer.quantizer.embedding.weight")
-
-    model.load_state_dict(state, strict=True)
 
 
 @hydra.main(version_base=None, config_path="../../../configs", config_name="train_var")

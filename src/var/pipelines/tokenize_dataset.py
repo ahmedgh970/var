@@ -10,6 +10,7 @@ from tqdm import tqdm
 
 from var.datasets.image_dataset import ImageDataset
 from var.datasets.transforms import build_val_transform
+from var.models.tokenizer.checkpoint import load_tokenizer_checkpoint
 from var.models.tokenizer.vqvae import VQVAE
 
 
@@ -37,24 +38,6 @@ def build_model(cfg: DictConfig) -> VQVAE:
         default_qresi_counts=int(tokenizer_cfg.get("default_qresi_counts", 0)),
     )
     return model
-
-
-def load_checkpoint(model: VQVAE, checkpoint_path: str):
-    ckpt = torch.load(checkpoint_path, map_location="cpu")
-    state = ckpt["model"] if isinstance(ckpt, dict) and "model" in ckpt else ckpt
-
-    model_keys = model.state_dict().keys()
-    has_single_key = "quantizer.embedding.weight" in state
-    has_multi_key = "quantizer.quantizer.embedding.weight" in state
-    expects_single = "quantizer.embedding.weight" in model_keys
-    expects_multi = "quantizer.quantizer.embedding.weight" in model_keys
-
-    if has_single_key and expects_multi:
-        state["quantizer.quantizer.embedding.weight"] = state.pop("quantizer.embedding.weight")
-    elif has_multi_key and expects_single:
-        state["quantizer.embedding.weight"] = state.pop("quantizer.quantizer.embedding.weight")
-
-    model.load_state_dict(state)
 
 
 def tokenize_split(
@@ -129,7 +112,7 @@ def main(cfg: DictConfig):
     log_file = run_dir / "tokenize.log"
 
     model = build_model(cfg).to(device)
-    load_checkpoint(model, cfg.checkpoint_path)
+    load_tokenizer_checkpoint(model, cfg.checkpoint_path)
     model.eval()
 
     split_to_subdir = {
