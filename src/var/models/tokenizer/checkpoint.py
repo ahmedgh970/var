@@ -122,10 +122,6 @@ def load_tokenizer_checkpoint(model: VQVAE, checkpoint_path: str, strict: bool =
     state = _remap_official_var_keys(original_state)
     state = _reconcile_quantizer_embedding_key(state, model)
 
-    remapped_count = sum(1 for k in state if k not in original_keys)
-    if remapped_count:
-        print(f"[checkpoint] remapped {remapped_count} key(s) from official VAR naming")
-
     if strict:
         _validate_remap(state, model, original_keys)
 
