@@ -66,9 +66,67 @@ def _reconcile_quantizer_embedding_key(state: dict[str, torch.Tensor], model: VQ
     return state
 
 
+def _validate_remap(
+    state: dict[str, torch.Tensor],
+    model: VQVAE,
+    original_keys: set[str],
+) -> None:
+    """Raise a descriptive error when the remapped state dict doesn't match the model.
+
+    Called before load_state_dict so the error message shows clearly what the
+    key remapping produced instead of PyTorch's generic missing/unexpected-key dump.
+    """
+    model_keys = set(model.state_dict().keys())
+    ckpt_keys = set(state.keys())
+    missing = model_keys - ckpt_keys
+    unexpected = ckpt_keys - model_keys
+
+    if not missing and not unexpected:
+        return
+
+    added_by_remap = ckpt_keys - original_keys
+    removed_by_remap = original_keys - ckpt_keys
+
+    lines = [
+        f"Checkpoint key mismatch after remapping "
+        f"({len(missing)} missing, {len(unexpected)} unexpected).",
+    ]
+    if missing:
+        lines.append(f"  Keys missing from checkpoint after remap ({len(missing)}):")
+        for k in sorted(missing)[:20]:
+            lines.append(f"    - {k}")
+        if len(missing) > 20:
+            lines.append(f"    ... and {len(missing) - 20} more")
+    if unexpected:
+        lines.append(f"  Unexpected keys in checkpoint after remap ({len(unexpected)}):")
+        for k in sorted(unexpected)[:20]:
+            lines.append(f"    - {k}")
+        if len(unexpected) > 20:
+            lines.append(f"    ... and {len(unexpected) - 20} more")
+    if added_by_remap:
+        lines.append(f"  Keys introduced by remap (new names, {len(added_by_remap)} total):")
+        for k in sorted(added_by_remap)[:10]:
+            lines.append(f"    + {k}")
+    if removed_by_remap:
+        lines.append(f"  Keys removed by remap (old names, {len(removed_by_remap)} total):")
+        for k in sorted(removed_by_remap)[:10]:
+            lines.append(f"    - {k}")
+    raise KeyError("\n".join(lines))
+
+
 def load_tokenizer_checkpoint(model: VQVAE, checkpoint_path: str, strict: bool = True):
-    ckpt = torch.load(checkpoint_path, map_location="cpu")
-    state = _extract_state_dict(ckpt)
-    state = _remap_official_var_keys(state)
+    ckpt = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
+    original_state = _extract_state_dict(ckpt)
+    original_keys = set(original_state.keys())
+
+    state = _remap_official_var_keys(original_state)
     state = _reconcile_quantizer_embedding_key(state, model)
+
+    remapped_count = sum(1 for k in state if k not in original_keys)
+    if remapped_count:
+        print(f"[checkpoint] remapped {remapped_count} key(s) from official VAR naming")
+
+    if strict:
+        _validate_remap(state, model, original_keys)
+
     return model.load_state_dict(state, strict=strict)

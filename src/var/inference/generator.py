@@ -38,6 +38,7 @@ def generate_token_indices(
     f_hat = torch.zeros((batch_size, cvae_dim, hw, hw), device=device)
 
     generated = []
+    model.kv_caching(True)
     for si, pn in enumerate(model.patch_nums):
         logits = model.sample_next_scale_with_var_input(
             cond_blc_wo_first_l=cond_blc,
@@ -71,6 +72,7 @@ def generate_token_indices(
         if si < len(model.patch_nums) - 1:
             cond_chunks.append(next_map.flatten(2).transpose(1, 2).contiguous())
             cond_blc = torch.cat(cond_chunks, dim=1)
-
+    model.kv_caching(False)
+        
     flat = torch.cat(generated, dim=1)
     return _unflatten_to_multiscale(flat, patch_nums=model.patch_nums)
