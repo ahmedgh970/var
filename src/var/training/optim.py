@@ -8,9 +8,21 @@ def build_optimizer(
     weight_decay: float = 0.0,
     betas: tuple[float, float] = (0.9, 0.95),
 ):
+    decay_params = []
+    no_decay_params = []
+    for name, p in model.named_parameters():
+        if not p.requires_grad:
+            continue
+        if p.ndim == 1 or name.endswith(".bias"):
+            no_decay_params.append(p)
+        else:
+            decay_params.append(p)
+
     return AdamW(
-        model.parameters(),
+        [
+            {"params": decay_params, "weight_decay": weight_decay},
+            {"params": no_decay_params, "weight_decay": 0.0},
+        ],
         lr=lr,
-        weight_decay=weight_decay,
         betas=betas,
     )

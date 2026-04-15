@@ -1,4 +1,6 @@
 from pathlib import Path
+import math
+from typing import Callable
 
 import torch
 import torch.distributed as dist
@@ -6,6 +8,8 @@ from torch import nn
 from torch.cuda.amp import GradScaler, autocast
 from torch.utils.data import DataLoader
 from tqdm import tqdm
+
+from var.training.ema import ModelEMA
 
 
 class VARTrainer:
@@ -18,9 +22,14 @@ class VARTrainer:
         device: str = "cuda",
         amp: bool = True,
         grad_clip: float = 1.0,
+        weight_decay_start: float = 0.05,
+        weight_decay_end: float = 0.05,
         save_dir: str = "checkpoints/var",
         log_file: str | None = None,
         is_main_process: bool = True,
+        ema: ModelEMA | None = None,
+        sample_fn: Callable[[nn.Module, Path, int], None] | None = None,
+        num_val_samples: int = 8,
     ):
         self.model = model
         self.tokenizer = tokenizer
@@ -29,10 +38,15 @@ class VARTrainer:
         self.device = torch.device(device)
         self.amp = amp
         self.grad_clip = grad_clip
+        self.weight_decay_start = float(weight_decay_start)
+        self.weight_decay_end = float(weight_decay_end)
         self.save_dir = Path(save_dir)
         self.save_dir.mkdir(parents=True, exist_ok=True)
         self.log_file = Path(log_file) if log_file is not None else None
         self.is_main_process = is_main_process
+        self.ema = ema
+        self.sample_fn = sample_fn
+        self.num_val_samples = num_val_samples
         self.scaler = GradScaler(enabled=self.amp)
         self.model.to(self.device)
         if self.tokenizer is not None:
@@ -57,6 +71,18 @@ class VARTrainer:
         t = torch.tensor([loss_sum, float(n)], device=self.device, dtype=torch.float64)
         dist.all_reduce(t, op=dist.ReduceOp.SUM)
         return float(t[0].item()), int(t[1].item())
+
+    def _set_weight_decay(self, epoch: int, total_epochs: int):
+        if total_epochs <= 1:
+            cur_wd = self.weight_decay_end
+        else:
+            t = float(epoch - 1) / float(total_epochs - 1)
+            cur_wd = self.weight_decay_end + (self.weight_decay_start - self.weight_decay_end) * (
+                0.5 + 0.5 * math.cos(math.pi * t)
+            )
+        for pg in self.optimizer.param_groups:
+            if pg.get("weight_decay", 0.0) > 0:
+                pg["weight_decay"] = cur_wd
 
     def _step(self, ms_tokens: list[torch.Tensor]):
         cond = None
@@ -84,6 +110,9 @@ class VARTrainer:
             self.scaler.step(self.optimizer)
             self.scaler.update()
 
+            if self.ema is not None:
+                self.ema.update(self.model)
+
             bs = ms_tokens[0].shape[0]
             loss_sum += float(loss.detach()) * bs
             n += bs
@@ -94,20 +123,50 @@ class VARTrainer:
 
     @torch.no_grad()
     def evaluate(self, val_loader: DataLoader, epoch: int):
-        self.model.eval()
-        loss_sum = 0.0
-        n = 0
-        pbar = tqdm(val_loader, desc=f"val {epoch}", leave=False, disable=not self.is_main_process)
+        if self.ema is not None:
+            self.ema.apply_shadow(self.model)
+        try:
+            self.model.eval()
+            loss_sum = 0.0
+            n = 0
+            pbar = tqdm(val_loader, desc=f"val {epoch}", leave=False, disable=not self.is_main_process)
 
-        for ms_tokens in pbar:
-            ms_tokens = [t.to(self.device, non_blocking=True) for t in ms_tokens]
-            loss = self._step(ms_tokens)
-            bs = ms_tokens[0].shape[0]
-            loss_sum += float(loss.detach()) * bs
-            n += bs
+            for ms_tokens in pbar:
+                ms_tokens = [t.to(self.device, non_blocking=True) for t in ms_tokens]
+                loss = self._step(ms_tokens)
+                bs = ms_tokens[0].shape[0]
+                loss_sum += float(loss.detach()) * bs
+                n += bs
 
-        loss_sum, n = self._sync(loss_sum, n)
+            loss_sum, n = self._sync(loss_sum, n)
+        finally:
+            if self.ema is not None:
+                self.ema.restore(self.model)
         return {"loss": loss_sum / max(1, n)}
+
+    def _generate_and_save_samples(self, epoch: int):
+        """Generate a small batch of images and save them for visual validation."""
+        if not self.is_main_process or self.sample_fn is None:
+            return
+        sample_dir = self.save_dir / "samples" / f"epoch_{epoch:04d}"
+        sample_dir.mkdir(parents=True, exist_ok=True)
+
+        model = self._unwrap_model()
+        was_training = model.training
+        model.eval()
+
+        if self.ema is not None:
+            self.ema.apply_shadow(self.model)
+        try:
+            with torch.no_grad():
+                self.sample_fn(model, sample_dir, self.num_val_samples)
+        finally:
+            if self.ema is not None:
+                self.ema.restore(self.model)
+            if was_training:
+                model.train()
+
+        self._log(f"[epoch {epoch}] saved {self.num_val_samples} samples -> {sample_dir}")
 
     def save_checkpoint(self, epoch: int, best: bool = False):
         if not self.is_main_process:
@@ -119,6 +178,8 @@ class VARTrainer:
             "scheduler": None if self.scheduler is None else self.scheduler.state_dict(),
             "scaler": self.scaler.state_dict(),
         }
+        if self.ema is not None:
+            ckpt["ema"] = self.ema.state_dict()
         torch.save(ckpt, self.save_dir / "last.pt")
         if best:
             torch.save(ckpt, self.save_dir / "best.pt")
@@ -132,12 +193,14 @@ class VARTrainer:
         save_every: int = 1,
         early_stopping_patience: int = 0,
         early_stopping_min_delta: float = 0.0,
+        sample_every: int = 0,
     ):
         best_val = float("inf")
         best_epoch = -1
         no_improve_count = 0
 
         for epoch in range(1, epochs + 1):
+            self._set_weight_decay(epoch=epoch, total_epochs=epochs)
             if hasattr(train_loader, "sampler") and hasattr(train_loader.sampler, "set_epoch"):
                 train_loader.sampler.set_epoch(epoch)
             train_stats = self.train_one_epoch(train_loader, epoch)
@@ -163,6 +226,9 @@ class VARTrainer:
             if save_every > 0 and epoch % save_every == 0:
                 self.save_checkpoint(epoch, best=False)
                 self._log(f"[epoch {epoch}] saved last.pt")
+
+            if sample_every > 0 and epoch % sample_every == 0:
+                self._generate_and_save_samples(epoch)
 
             if val_stats is None:
                 self._log(f"[epoch {epoch}] train loss={train_stats['loss']:.4f}")

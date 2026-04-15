@@ -23,11 +23,16 @@ def build_var_model(cfg: DictConfig) -> VARModel:
     return VARModel(
         vocab_size=var_cfg.vocab_size,
         patch_nums=tuple(cfg.tokenizer.patch_nums),
+        cvae_dim=cfg.tokenizer.z_channels,
         dim=var_cfg.dim,
         depth=var_cfg.depth,
         num_heads=var_cfg.num_heads,
         mlp_ratio=var_cfg.mlp_ratio,
         dropout=var_cfg.dropout,
+        drop_path_rate=float(var_cfg.get("drop_path_rate", 0.0)),
+        attn_l2_norm=bool(var_cfg.get("attn_l2_norm", True)),
+        init_head=float(var_cfg.get("init_head", 0.02)),
+        init_std=float(var_cfg.get("init_std", -1.0)),
     )
 
 
@@ -51,10 +56,20 @@ def build_tokenizer(cfg: DictConfig) -> VQVAE:
     )
 
 
-def _load_state_dict_raw(model, checkpoint_path: str):
-    ckpt = torch.load(checkpoint_path, map_location="cpu")
+def _load_var_checkpoint(model, checkpoint_path: str, use_ema: bool = False):
+    ckpt = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
+    # Always load the base model state first (ensures buffers are populated).
     state = ckpt["model"] if isinstance(ckpt, dict) and "model" in ckpt else ckpt
     model.load_state_dict(state)
+    # Overlay EMA parameters on top if requested and available.
+    if use_ema and isinstance(ckpt, dict) and "ema" in ckpt:
+        with torch.no_grad():
+            for name, param in model.named_parameters():
+                if name in ckpt["ema"]:
+                    param.data.copy_(ckpt["ema"][name])
+        print(f"[generate] loaded EMA weights from {checkpoint_path}")
+    elif use_ema:
+        print(f"[generate] use_ema=True but no 'ema' key found in checkpoint; using raw model weights")
 
 
 @hydra.main(version_base=None, config_path="../../../configs", config_name="generate")
@@ -74,8 +89,11 @@ def main(cfg: DictConfig):
     var_model = build_var_model(cfg).to(device)
     tokenizer = build_tokenizer(cfg).to(device)
 
-    _load_state_dict_raw(var_model, cfg.var_checkpoint_path)
+    _load_var_checkpoint(var_model, cfg.var_checkpoint_path, use_ema=bool(cfg.get("use_ema", False)))
     load_tokenizer_checkpoint(tokenizer, cfg.tokenizer_checkpoint_path)
+
+    if bool(cfg.var.get("torch_compile", False)) and hasattr(torch, "compile"):
+        var_model = torch.compile(var_model)
 
     var_model.eval()
     tokenizer.eval()
