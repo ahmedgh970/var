@@ -1,8 +1,12 @@
 name: var_base
 vocab_size: 4096
-patch_nums: [1, 2, 4, 8, 16]
-dim: 768
-depth: 12
-num_heads: 12
+dim: 384
+depth: 8
+num_heads: 6
 mlp_ratio: 4.0
-dropout: 0.0
+dropout: 0.0        # no dropout on tiny data — let the model fit
+drop_path_rate: 0.05  # minimal stochastic depth; 0.2 is for large-scale training
+attn_l2_norm: true
+torch_compile: false
+init_head: 0.02
+init_std: -1.0

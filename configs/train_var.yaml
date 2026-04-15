@@ -6,33 +6,53 @@ defaults:
 seed: 42
 device: cuda
 
-tokens_root: /data/tii/data/ffhq256_train_val/tokens/multi
+tokens_root: /data/tii/data/ffhq256_train_val/tokens/pre_vqvae
 checkpoint_dir: checkpoints/var
-tokenizer_checkpoint_path: ""
+tokenizer_checkpoint_path: checkpoints/tokenizer/vae_ch160v4096z32.pth
 
 hydra:
   run:
     dir: ${checkpoint_dir}/${now:%Y-%m-%d_%H-%M-%S}
 
 train:
-  epochs: 200
+  epochs: 1000
   batch_size: 32
   eval_batch_size: 32
   num_workers: 8
   pin_memory: true
   drop_last: true
 
-  lr: 1.0e-4
+  # Base LR is scaled by global_batch_size / 256 in the pipeline.
+  # With batch_size=32 on 1 GPU: effective LR = 1e-3 * 32/256 = 1.25e-4.
+  lr: 1.0e-3
   weight_decay: 0.05
   betas: [0.9, 0.95]
   grad_clip: 1.0
   amp: true
-  eval_every: 1
-  save_every: 5
-  early_stopping_patience: 15
-  early_stopping_min_delta: 1.0e-4
+  eval_every: 5       # val loss every 5 epochs — cheap and avoids log spam
+  save_every: 100     # save checkpoint every 100 epochs (10 total over 1000)
+  early_stopping_patience: 0   # disabled — train for the full 1000 epochs
+  early_stopping_min_delta: 0.0
+
+  # Visual validation: generate samples every 50 epochs → 20 snapshots over training.
+  sample_every: 50
+  num_val_samples: 8
+
+# EMA of VAR model weights.
+# decay=0.999 is safer than 0.9999 for tiny datasets with few optimizer steps per epoch.
+ema:
+  enabled: true
+  decay: 0.999
+
+# Sampling parameters used when generating validation samples during training.
+# Temperature < 1 gives sharper, more coherent face structure.
+val_temperature: 0.9
+val_top_k: 2000
+val_top_p: 0.95
 
 scheduler:
-  name: cosine
-  warmup_epochs: 0
-  min_lr_ratio: 0.1
+  # warmup_cosine stays near peak LR longer than lin0 — better for long tiny-data runs.
+  name: warmup_cosine
+  warmup_epochs: 40   # 4% of 1000 epochs; long warmup prevents early instability
+  final_lr_ratio: 0.05  # decay to 5% of peak LR by epoch 1000
+  weight_decay_end: 0.05
