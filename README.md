@@ -15,13 +15,14 @@ The code is intentionally minimal and research-oriented.
 We currently use **FFHQ 256**.
 
 Configured dataset path:
-- `/data/tii/data/ffhq256_train_val`
+- `/data/tii/data/ffhq256_train_val/images`
 
 Expected structure:
 ```text
-/data/tii/data/ffhq256_train_val/
-├── train/   # ~4500 images
-└── val/     # ~500 images
+/data/tii/data/ffhq256_train_val/images
+├── train/   # ~4000 images
+├── val/     # ~500 images
+└── test/     # ~500 images
 ```
 
 ## Configs
@@ -29,6 +30,7 @@ Expected structure:
 Main config files currently prepared:
 - [`configs/datasets/ffhq.yaml`](./configs/datasets/ffhq.yaml)
 - [`configs/tokenizer/vqvae_ffhq.yaml`](./configs/tokenizer/vqvae_ffhq.yaml)
+- 
 
 ## Project Layout
 
@@ -44,6 +46,6 @@ src/var/
 
 ## Status
 
-- Dataset pipeline: in progress
-- Tokenizer (VQ-VAE): next
-- VAR training pipeline: planned
+- Dataset pipeline: Done !
+- Tokenizer (VQ-VAE): Done ! 
+- VAR training pipeline: Done ! 
