@@ -1,7 +1,8 @@
 name: ffhq
-data_root: /data/tii/data/images/ffhq256_train_val
+data_root: /data/tii/data/ffhq5k/images
+token_root: /data/tii/data/ffhq5k/tokens
 train_subdir: train
 val_subdir: val
-test_subdir: test
+test_subdir: val
 image_size: 256
 mid_reso: 1.125

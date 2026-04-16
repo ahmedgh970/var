@@ -35,6 +35,7 @@ Thumbs.db
 outputs/**
 !outputs/.gitkeep
 tests/**
+.claude/**
 
 # Training artifacts
 checkpoints/**

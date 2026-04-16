@@ -1,0 +1,8 @@
+name: imagenet
+data_root: /data/tii/data/imagenet1k_256px/images
+token_root: /data/tii/data/imagenet1k_256px/tokens
+train_subdir: train
+val_subdir: val
+test_subdir: val
+image_size: 256
+mid_reso: 1.125

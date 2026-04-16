@@ -6,17 +6,10 @@ from torch.utils.data import Dataset
 
 
 class TokenDataset(Dataset):
-    def __init__(
-        self,
-        split_dir,
-        return_image_relpath: bool = False,
-    ):
+    def __init__(self, split_dir):
         self.split_dir = Path(split_dir)
-        self.return_image_relpath = return_image_relpath
         self.manifest = []
-
-        manifest_path = self.split_dir / "manifest.jsonl"
-        with manifest_path.open("r", encoding="utf-8") as f:
+        with (self.split_dir / "manifest.jsonl").open("r", encoding="utf-8") as f:
             for line in f:
                 self.manifest.append(json.loads(line))
 
@@ -25,19 +18,16 @@ class TokenDataset(Dataset):
 
     def __getitem__(self, index):
         item = self.manifest[index]
-        sample = torch.load(self.split_dir / item["token_path"], map_location="cpu")
-        tokens = [t.to(torch.long) for t in sample["tokens"]]
+        # token_path is relative to split_dir, e.g. "academic_gown,.../0400_imgid.pt"
+        sample = torch.load(self.split_dir / item["token_path"], map_location="cpu", weights_only=False)
+        tokens = [t.to(torch.long) for t in sample]
+        label = torch.tensor(item["label"], dtype=torch.long)
+        return tokens, label
 
-        if self.return_image_relpath:
-            return tokens, sample["image_relpath"]
-        return tokens
 
-
-def build_token_datasets(
-    token_root,
-):
+def build_token_datasets(token_root):
     token_root = Path(token_root)
-    datasets = {}
-    datasets["train"] = TokenDataset(token_root / "train")
-    datasets["val"] = TokenDataset(token_root / "val")
-    return datasets
+    return {
+        "train": TokenDataset(token_root / "train"),
+        "val":   TokenDataset(token_root / "val"),
+    }

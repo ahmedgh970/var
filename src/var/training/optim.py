@@ -13,7 +13,7 @@ def build_optimizer(
     for name, p in model.named_parameters():
         if not p.requires_grad:
             continue
-        if p.ndim == 1 or name.endswith(".bias"):
+        if p.ndim == 1 or name.endswith(".bias") or "scale_mul" in name:
             no_decay_params.append(p)
         else:
             decay_params.append(p)

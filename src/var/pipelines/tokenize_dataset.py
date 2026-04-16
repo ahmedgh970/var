@@ -20,24 +20,23 @@ def set_seed(seed: int):
 
 
 def build_model(cfg: DictConfig) -> VQVAE:
-    tokenizer_cfg = cfg.tokenizer
-    model = VQVAE(
-        vocab_size=tokenizer_cfg.vocab_size,
-        z_channels=tokenizer_cfg.z_channels,
-        ch=tokenizer_cfg.ch,
-        ch_mult=tuple(tokenizer_cfg.ch_mult),
-        num_res_blocks=tokenizer_cfg.num_res_blocks,
-        dropout=tokenizer_cfg.dropout,
-        beta=tokenizer_cfg.beta,
-        using_znorm=tokenizer_cfg.using_znorm,
-        patch_nums=tuple(tokenizer_cfg.patch_nums),
-        quantizer_type=tokenizer_cfg.quantizer_type,
-        quant_conv_ks=tokenizer_cfg.quant_conv_ks,
-        quant_resi=float(tokenizer_cfg.get("quant_resi", 0.5)),
-        share_quant_resi=int(tokenizer_cfg.get("share_quant_resi", 4)),
-        default_qresi_counts=int(tokenizer_cfg.get("default_qresi_counts", 0)),
+    t = cfg.tokenizer
+    return VQVAE(
+        vocab_size=t.vocab_size,
+        z_channels=t.z_channels,
+        ch=t.ch,
+        ch_mult=tuple(t.ch_mult),
+        num_res_blocks=t.num_res_blocks,
+        dropout=t.dropout,
+        beta=t.beta,
+        using_znorm=t.using_znorm,
+        patch_nums=tuple(t.patch_nums),
+        quantizer_type=t.quantizer_type,
+        quant_conv_ks=t.quant_conv_ks,
+        quant_resi=float(t.get("quant_resi", 0.5)),
+        share_quant_resi=int(t.get("share_quant_resi", 4)),
+        default_qresi_counts=int(t.get("default_qresi_counts", 0)),
     )
-    return model
 
 
 def tokenize_split(
@@ -48,10 +47,7 @@ def tokenize_split(
     cfg: DictConfig,
     out_dir: Path,
 ):
-    transform = build_val_transform(
-        image_size=cfg.datasets.image_size,
-        mid_reso=cfg.datasets.mid_reso,
-    )
+    transform = build_val_transform(image_size=cfg.datasets.image_size, mid_reso=cfg.datasets.mid_reso)
     dataset = ImageDataset(root=split_root, transform=transform)
     loader = DataLoader(
         dataset,
@@ -64,35 +60,37 @@ def tokenize_split(
 
     split_dir = out_dir / split_name
     split_dir.mkdir(parents=True, exist_ok=True)
-    manifest_path = split_dir / "manifest.jsonl"
 
-    with manifest_path.open("w", encoding="utf-8") as mf, torch.no_grad():
+    with (split_dir / "manifest.jsonl").open("w", encoding="utf-8") as mf, torch.no_grad():
         offset = 0
-        pbar = tqdm(loader, desc=f"tokenize {split_name}", leave=False)
-        for images in pbar:
+        for images in tqdm(loader, desc=f"tokenize {split_name}", leave=False):
             images = images.to(device, non_blocking=True)
             ms_idx = model.encode_to_indices(images)
 
             bs = images.shape[0]
-            sample_paths = dataset.samples[offset: offset + bs]
-            for b in range(bs):
-                rel = sample_paths[b].relative_to(split_root)
-                stem = str(rel.with_suffix("")).replace("/", "__")
-                token_path = split_dir / f"{stem}.pt"
+            for b, src_path in enumerate(dataset.samples[offset: offset + bs]):
+                rel = src_path.relative_to(split_root)
+                # rel = academic_gown,.../0400_imgid.jpg
+                class_name = rel.parts[0]
+                stem = rel.stem                          # e.g. "0400_imgid"
+                label = int(stem.split("_")[0])          # e.g. 400
 
-                tokens = [idx[b].detach().cpu().to(torch.int32) for idx in ms_idx]
-                torch.save({"tokens": tokens, "image_relpath": str(rel)}, token_path)
+                token_dir = split_dir / class_name
+                token_dir.mkdir(parents=True, exist_ok=True)
+                token_filename = stem + ".pt"
+                token_abs = token_dir / token_filename
+                token_rel = class_name + "/" + token_filename   # relative to split_dir
 
-                mf.write(
-                    json.dumps(
-                        {
-                            "token_path": token_path.name,
-                            "image_relpath": str(rel),
-                            "num_scales": len(tokens),
-                        }
-                    )
-                    + "\n"
-                )
+                tokens = [ms_idx[si][b].detach().cpu().to(torch.int32) for si in range(len(ms_idx))]
+                torch.save(tokens, token_abs)
+
+                mf.write(json.dumps({
+                    "token_path": token_rel,
+                    "image_relpath": str(rel),
+                    "class": class_name,
+                    "label": label,
+                    "num_scales": len(tokens),
+                }) + "\n")
             offset += bs
 
     return len(dataset)
@@ -109,7 +107,6 @@ def main(cfg: DictConfig):
 
     run_dir = Path(HydraConfig.get().runtime.output_dir)
     run_dir.mkdir(parents=True, exist_ok=True)
-    log_file = run_dir / "tokenize.log"
 
     model = build_model(cfg).to(device)
     load_tokenizer_checkpoint(model, cfg.checkpoint_path)
@@ -117,26 +114,22 @@ def main(cfg: DictConfig):
 
     split_to_subdir = {
         "train": cfg.datasets.train_subdir,
-        "val": cfg.datasets.val_subdir,
-        "test": cfg.datasets.test_subdir,
+        "val":   cfg.datasets.val_subdir,
+        "test":  cfg.datasets.test_subdir,
     }
 
     lines = [f"checkpoint: {cfg.checkpoint_path}"]
     for split in cfg.splits:
         split_root = Path(cfg.datasets.data_root) / split_to_subdir[split]
         n = tokenize_split(
-            model=model,
-            device=device,
-            split_name=split,
-            split_root=split_root,
-            cfg=cfg,
-            out_dir=run_dir,
+            model=model, device=device, split_name=split,
+            split_root=split_root, cfg=cfg, out_dir=run_dir,
         )
         lines.append(f"{split}: {n} images")
 
     text = "\n".join(lines)
     print(text)
-    with log_file.open("w", encoding="utf-8") as f:
+    with (run_dir / "tokenize.log").open("w", encoding="utf-8") as f:
         f.write(text + "\n")
 
 

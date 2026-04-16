@@ -84,7 +84,7 @@ def main(cfg: DictConfig):
     )
 
     model = build_model(cfg).to(device)
-    load_tokenizer_checkpoint(model, cfg.checkpoint_path)
+    load_tokenizer_checkpoint(model, cfg.tokenizer.checkpoint_path)
     model.eval()
 
     rec_meter = 0.0
@@ -119,7 +119,7 @@ def main(cfg: DictConfig):
     total_mean = total_meter / max(1, n)
 
     lines = [
-        f"checkpoint: {cfg.checkpoint_path}",
+        f"checkpoint: {cfg.tokenizer.checkpoint_path}",
         f"split: {cfg.datasets.test_subdir}",
         f"num_images: {n}",
         f"recon_{cfg.recon_loss_type}: {rec_mean:.6f}",

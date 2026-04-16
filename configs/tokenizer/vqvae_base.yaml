@@ -1,4 +1,5 @@
 name: vqvae_base # 256px images
+checkpoint_path: checkpoints/tokenizer/vae_ch160v4096z32.pth
 quantizer_type: multi   # or single
 vocab_size: 4096
 z_channels: 32

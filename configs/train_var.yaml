@@ -1,58 +1,74 @@
 defaults:
   - var: var_base
   - tokenizer: vqvae_base
+  - datasets: imagenet
   - _self_
 
+# =========================
+# 1) Run / Paths
+# =========================
 seed: 42
 device: cuda
 
-tokens_root: /data/tii/data/ffhq256_train_val/tokens/pre_vqvae
 checkpoint_dir: checkpoints/var
-tokenizer_checkpoint_path: checkpoints/tokenizer/vae_ch160v4096z32.pth
 
 hydra:
   run:
     dir: ${checkpoint_dir}/${now:%Y-%m-%d_%H-%M-%S}
 
+# =========================
+# 2) Training core
+# =========================
 train:
-  epochs: 1000
+  epochs: 200
   batch_size: 32
+  grad_accum_steps: 1
+  progressive_ratio: 0.0
+  progressive_start_stage: 4
+  progressive_warmup_epochs: 0.0
   eval_batch_size: 32
   num_workers: 8
   pin_memory: true
   drop_last: true
 
-  # Base LR is scaled by global_batch_size / 256 in the pipeline.
-  # With batch_size=32 on 1 GPU: effective LR = 1e-3 * 32/256 = 1.25e-4.
-  lr: 1.0e-3
+  grad_clip: 2.0
+  amp: true
+
+# =========================
+# 3) Optim / schedule
+# =========================
+optim:
+  base_lr: 1.0e-4  # effective lr = base_lr * (global_batch_size * grad_accum_steps / 256)
   weight_decay: 0.05
   betas: [0.9, 0.95]
-  grad_clip: 1.0
-  amp: true
-  eval_every: 5       # val loss every 5 epochs — cheap and avoids log spam
-  save_every: 100     # save checkpoint every 100 epochs (10 total over 1000)
-  early_stopping_patience: 0   # disabled — train for the full 1000 epochs
-  early_stopping_min_delta: 0.0
-
-  # Visual validation: generate samples every 50 epochs → 20 snapshots over training.
-  sample_every: 50
-  num_val_samples: 8
-
-# EMA of VAR model weights.
-# decay=0.999 is safer than 0.9999 for tiny datasets with few optimizer steps per epoch.
-ema:
-  enabled: true
-  decay: 0.999
-
-# Sampling parameters used when generating validation samples during training.
-# Temperature < 1 gives sharper, more coherent face structure.
-val_temperature: 0.9
-val_top_k: 2000
-val_top_p: 0.95
 
 scheduler:
-  # warmup_cosine stays near peak LR longer than lin0 — better for long tiny-data runs.
-  name: warmup_cosine
-  warmup_epochs: 40   # 4% of 1000 epochs; long warmup prevents early instability
-  final_lr_ratio: 0.05  # decay to 5% of peak LR by epoch 1000
+  name: lin0
+  warmup_epochs: 4
+  warmup_start_ratio: 0.005
+  final_lr_ratio: 0.01
   weight_decay_end: 0.05
+
+# =========================
+# 4) Eval / ckpt cadence
+# =========================
+logging:
+  eval_every: 1
+  save_every: 10
+  sample_every: 5
+  num_val_samples: 4
+  early_stopping_patience: 0
+  early_stopping_min_delta: 0.0
+
+# =========================
+# 5) EMA / sampling knobs
+# =========================
+ema:
+  enabled: false
+  decay: 0.9999
+
+sampling:
+  val_cfg_scale: 1.5
+  val_temperature: 0.9
+  val_top_k: 900
+  val_top_p: 0.96

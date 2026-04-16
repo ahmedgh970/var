@@ -31,6 +31,11 @@ def build_var_model(cfg: DictConfig) -> VARModel:
         dropout=var_cfg.dropout,
         drop_path_rate=float(var_cfg.get("drop_path_rate", 0.0)),
         attn_l2_norm=bool(var_cfg.get("attn_l2_norm", True)),
+        num_classes=int(var_cfg.get("num_classes", 1000)),
+        cond_drop_rate=float(var_cfg.get("cond_drop_rate", 0.1)),
+        label_smoothing=float(var_cfg.get("label_smoothing", 0.0)),
+        init_adaln=float(var_cfg.get("init_adaln", 0.5)),
+        init_adaln_gamma=float(var_cfg.get("init_adaln_gamma", 1.0e-5)),
         init_head=float(var_cfg.get("init_head", 0.02)),
         init_std=float(var_cfg.get("init_std", -1.0)),
     )
@@ -58,18 +63,17 @@ def build_tokenizer(cfg: DictConfig) -> VQVAE:
 
 def _load_var_checkpoint(model, checkpoint_path: str, use_ema: bool = False):
     ckpt = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
-    # Always load the base model state first (ensures buffers are populated).
     state = ckpt["model"] if isinstance(ckpt, dict) and "model" in ckpt else ckpt
-    model.load_state_dict(state)
-    # Overlay EMA parameters on top if requested and available.
+    missing, unexpected = model.load_state_dict(state, strict=False)
+    if missing:
+        print(f"[load_var_checkpoint] missing keys: {len(missing)}")
+    if unexpected:
+        print(f"[load_var_checkpoint] unexpected keys: {len(unexpected)}")
     if use_ema and isinstance(ckpt, dict) and "ema" in ckpt:
         with torch.no_grad():
             for name, param in model.named_parameters():
                 if name in ckpt["ema"]:
                     param.data.copy_(ckpt["ema"][name])
-        print(f"[generate] loaded EMA weights from {checkpoint_path}")
-    elif use_ema:
-        print(f"[generate] use_ema=True but no 'ema' key found in checkpoint; using raw model weights")
 
 
 @hydra.main(version_base=None, config_path="../../../configs", config_name="generate")
@@ -84,13 +88,14 @@ def main(cfg: DictConfig):
     run_dir = Path(HydraConfig.get().runtime.output_dir)
     sample_dir = run_dir / "samples"
     sample_dir.mkdir(parents=True, exist_ok=True)
-    log_file = run_dir / "generate.log"
 
     var_model = build_var_model(cfg).to(device)
     tokenizer = build_tokenizer(cfg).to(device)
-
-    _load_var_checkpoint(var_model, cfg.var_checkpoint_path, use_ema=bool(cfg.get("use_ema", False)))
-    load_tokenizer_checkpoint(tokenizer, cfg.tokenizer_checkpoint_path)
+    tokenizer_ckpt_path = cfg.tokenizer.get("checkpoint_path", cfg.get("tokenizer_checkpoint_path", None))
+    if not tokenizer_ckpt_path:
+        raise ValueError("Missing tokenizer checkpoint path. Set `tokenizer.checkpoint_path` in tokenizer config.")
+    _load_var_checkpoint(var_model, cfg.var_checkpoint_path, use_ema=bool(cfg.get("use_ema", True)))
+    load_tokenizer_checkpoint(tokenizer, tokenizer_ckpt_path)
 
     if bool(cfg.var.get("torch_compile", False)) and hasattr(torch, "compile"):
         var_model = torch.compile(var_model)
@@ -100,19 +105,27 @@ def main(cfg: DictConfig):
 
     num_samples = int(cfg.num_samples)
     batch_size = int(cfg.batch_size)
-    num_batches = math.ceil(num_samples / batch_size)
+    num_classes = int(cfg.var.get("num_classes", 1000))
+
+    # class_labels: null → cycle through 0..num_classes, or explicit list
+    if cfg.get("class_labels") is None:
+        all_labels = torch.arange(num_samples, device=device) % num_classes
+    else:
+        all_labels = torch.tensor(list(cfg.class_labels), device=device)
 
     saved = 0
-    for _ in range(num_batches):
+    for _ in range(math.ceil(num_samples / batch_size)):
         bs = min(batch_size, num_samples - saved)
+        labels = all_labels[saved: saved + bs]
         ms_idx = generate_token_indices(
             model=var_model,
             tokenizer=tokenizer,
             batch_size=bs,
+            class_labels=labels,
+            cfg_scale=float(cfg.get("cfg_scale", 1.5)),
             temperature=float(cfg.temperature),
             top_k=int(cfg.top_k),
             top_p=float(cfg.top_p),
-            start_token=cfg.start_token,
         )
         images = decode_indices_to_images(tokenizer, ms_idx)
         save_images(images_pm1=images, out_dir=sample_dir, start_index=saved, prefix=str(cfg.sample_prefix))
@@ -120,17 +133,17 @@ def main(cfg: DictConfig):
 
     lines = [
         f"var_checkpoint: {cfg.var_checkpoint_path}",
-        f"tokenizer_checkpoint: {cfg.tokenizer_checkpoint_path}",
+        f"tokenizer_checkpoint: {tokenizer_ckpt_path}",
         f"num_samples: {saved}",
+        f"cfg_scale: {cfg.get('cfg_scale', 1.5)}",
         f"temperature: {cfg.temperature}",
         f"top_k: {cfg.top_k}",
         f"top_p: {cfg.top_p}",
         f"sample_dir: {sample_dir}",
     ]
-    text = "\n".join(lines)
-    print(text)
-    with log_file.open("w", encoding="utf-8") as f:
-        f.write(text + "\n")
+    print("\n".join(lines))
+    with (run_dir / "generate.log").open("w", encoding="utf-8") as f:
+        f.write("\n".join(lines) + "\n")
 
 
 if __name__ == "__main__":

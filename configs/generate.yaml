@@ -6,22 +6,16 @@ defaults:
 seed: 42
 device: cuda:1
 
-var_checkpoint_path: /data/ahmed.ghorbel/projects/10-var/checkpoints/var/2026-04-14_18-34-32/last.pt
-tokenizer_checkpoint_path: /data/ahmed.ghorbel/projects/10-var/checkpoints/tokenizer/vae_ch160v4096z32.pth
+var_checkpoint_path: checkpoints/var/2026-04-15_17-56-31/last.pt
 
-use_ema: true  # load EMA weights from checkpoint if available
+use_ema: true
 
 num_samples: 16
 batch_size: 8
 
+cfg_scale: 1.5          # classifier-free guidance scale; set to 1.0 to disable
+class_labels: null      # null = cycle 0..num_classes; or explicit list e.g. [0, 1, 7, 207]
 temperature: 0.9
-top_k: 200
-top_p: 0.9
-start_token: null
-sample_prefix: sample
-
-output_dir: experiments/var
-
-hydra:
-  run:
-    dir: ${output_dir}/${now:%Y-%m-%d_%H-%M-%S}
+top_k: 900
+top_p: 0.96
+sample_prefix: "sample"

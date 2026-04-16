@@ -1,17 +1,17 @@
 defaults:
-  - datasets: ffhq
+  - datasets: imagenet
   - tokenizer: vqvae_base
   - _self_
 
 seed: 42
-device: cuda
+device: cuda:1
 
-checkpoint_path: /path/to/tokenizer_checkpoint.pt
-splits: [train, val, test]
-batch_size: 16
+checkpoint_path: checkpoints/tokenizer/vae_ch160v4096z32.pth
+splits: [train, val]
+batch_size: 32
 num_workers: 8
 pin_memory: true
-output_root: /data/tii/data/ffhq256_train_val/tokens
+output_root: /data/tii/data/imagenet1k_256px/tokens
 
 hydra:
   run:
