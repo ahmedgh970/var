@@ -7,8 +7,8 @@
 #SBATCH --gres=gpu:4
 #SBATCH --cpus-per-task=10
 #SBATCH --time=20:00:00
-#SBATCH --partition=gpu_p5
-#SBATCH --account=vcv@a100
+#SBATCH --partition=gpu_p6
+#SBATCH --account=vcv@h100
 #SBATCH --hint=nomultithread
 
 # --- Environnement ---
@@ -40,5 +40,11 @@ srun torchrun \
     datasets.token_root=$TOKENS \
     tokenizer.checkpoint_path=$TOKENIZER_CKPT \
     checkpoint_dir=$CKPT_DIR \
+    train.epochs=1000 \
     train.batch_size=64 \
-    train.num_workers=8
+    train.num_workers=10 \
+    train.eval_batch_size=64 \
+    logging.eval_every=1 \
+    logging.save_every=10 \
+    logging.sample_every=50 \
+    logging.num_val_samples=4 \
