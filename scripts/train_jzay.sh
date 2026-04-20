@@ -7,8 +7,8 @@
 #SBATCH --gres=gpu:4
 #SBATCH --cpus-per-task=10
 #SBATCH --time=20:00:00
-#SBATCH --partition=gpu_p6
-#SBATCH --account=vcv@h100
+#SBATCH --partition=gpu_p5
+#SBATCH --account=vcv@a100
 #SBATCH --hint=nomultithread
 
 # --- Environnement ---
