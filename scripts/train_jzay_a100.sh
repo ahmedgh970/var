@@ -49,9 +49,13 @@ srun torchrun \
     var.num_heads=8 \
     var.drop_path_rate=0.0333 \
     train.epochs=1000 \
-    train.batch_size=64 \
+    train.batch_size=256 \
     train.num_workers=10 \
-    train.eval_batch_size=64 \
+    train.eval_batch_size=256 \
+    train.grad_accum_steps=2 \
+    var.torch_compile=true \
+    ema.enabled=true \
+    ema.decay=0.9999 \
     logging.eval_every=1 \
     logging.save_every=10 \
     logging.sample_every=50 \
