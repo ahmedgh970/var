@@ -5,29 +5,22 @@
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=4
 #SBATCH --gres=gpu:4
-#SBATCH --cpus-per-task=10
+#SBATCH --cpus-per-task=8
 #SBATCH --time=00:30:00
-#SBATCH --partition=gpu_p13
-#SBATCH --account=vcv@v100
+#SBATCH --partition=gpu_p5
+#SBATCH --account=vcv@a100
 #SBATCH --hint=nomultithread
-#SBATCH -C v100-32g        # ← cibler V100 32Go explicitement
+#SBATCH -C a100
 
 # --- Environnement ---
 module purge
+module load arch/a100
 module load pytorch-gpu/py3/2.2.0
 
 export PYTHONPATH=$HOME/var/src:$PYTHONPATH
 export TMPDIR=$SCRATCH/tmp
 export PYTHONUNBUFFERED=1
 mkdir -p $SCRATCH/tmp
-
-# --- Chemins ---
-TOKENS=$SCRATCH/dataset/imagenet1k_256px/tokens
-TOKENIZER_CKPT=$WORK/checkpoints/tokenizer/vae_ch160v4096z32.pth
-CKPT_DIR=$WORK/checkpoints/var_test
-
-mkdir -p $WORK/logs
-mkdir -p $CKPT_DIR
 
 # --- Lancement ---
 cd $HOME/var
