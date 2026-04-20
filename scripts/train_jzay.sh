@@ -5,18 +5,21 @@
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=4
 #SBATCH --gres=gpu:4
-#SBATCH --cpus-per-task=10
+#SBATCH --cpus-per-task=24        # 1/4 du noeud H100 (96 coeurs)
 #SBATCH --time=20:00:00
-#SBATCH --partition=gpu_p5
-#SBATCH --account=vcv@a100
+#SBATCH --partition=gpu_p6
+#SBATCH --account=vcv@h100
 #SBATCH --hint=nomultithread
+#SBATCH -C h100                   # ← MANQUAIT CETTE LIGNE !
 
 # --- Environnement ---
 module purge
+module load arch/h100             # ← CHARGER EN PREMIER !
 module load pytorch-gpu/py3/2.2.0
 
 export PYTHONPATH=$HOME/var/src:$PYTHONPATH
 export TMPDIR=$SCRATCH/tmp
+export PYTHONUNBUFFERED=1
 mkdir -p $SCRATCH/tmp
 
 # --- Chemins ---
@@ -47,4 +50,4 @@ srun torchrun \
     logging.eval_every=1 \
     logging.save_every=10 \
     logging.sample_every=50 \
-    logging.num_val_samples=4 \
+    logging.num_val_samples=4
