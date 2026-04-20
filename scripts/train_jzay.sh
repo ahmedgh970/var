@@ -10,11 +10,11 @@
 #SBATCH --partition=gpu_p6
 #SBATCH --account=vcv@h100
 #SBATCH --hint=nomultithread
-#SBATCH -C h100                   # ← MANQUAIT CETTE LIGNE !
+#SBATCH -C h100                 
 
 # --- Environnement ---
 module purge
-module load arch/h100             # ← CHARGER EN PREMIER !
+module load arch/h100           
 module load pytorch-gpu/py3/2.2.0
 
 export PYTHONPATH=$HOME/var/src:$PYTHONPATH
@@ -25,7 +25,8 @@ mkdir -p $SCRATCH/tmp
 # --- Chemins ---
 TOKENS=$SCRATCH/dataset/imagenet1k_256px/tokens
 TOKENIZER_CKPT=$WORK/checkpoints/tokenizer/vae_ch160v4096z32.pth
-CKPT_DIR=$WORK/checkpoints/var
+CKPT_DIR=$WORK/checkpoints/var_train
+MASTER_PORT=$((29500 + SLURM_JOB_ID % 1000))
 
 mkdir -p $WORK/logs
 mkdir -p $CKPT_DIR
@@ -38,7 +39,7 @@ srun torchrun \
     --nproc_per_node=4 \
     --rdzv_id=$SLURM_JOB_ID \
     --rdzv_backend=c10d \
-    --rdzv_endpoint=$SLURMD_NODENAME:29501 \
+    --rdzv_endpoint=$SLURMD_NODENAME:$MASTER_PORT \
     -m var.pipelines.train_var \
     datasets.token_root=$TOKENS \
     tokenizer.checkpoint_path=$TOKENIZER_CKPT \
