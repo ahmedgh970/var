@@ -7,7 +7,7 @@ class InfiniteBatchSampler(Sampler):
         self,
         dataset_len: int,
         batch_size: int,
-        seed_for_all_rank: int = 0,
+        seed_for_all_ranks: int = 0,
         fill_last: bool = False,
         shuffle: bool = True,
         start_ep: int = 0,
@@ -20,7 +20,7 @@ class InfiniteBatchSampler(Sampler):
         self.fill_last = bool(fill_last)
         self.shuffle = bool(shuffle)
         self.epoch = int(start_ep)
-        self.same_seed_for_all_ranks = int(seed_for_all_rank)
+        self.same_seed_for_all_ranks = int(seed_for_all_ranks)
         self.indices = self._generate_indices()
         self.start_ep = int(start_ep)
         self.start_it = int(start_it)
