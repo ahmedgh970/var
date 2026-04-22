@@ -1,37 +1,33 @@
 #!/bin/bash
-#SBATCH --job-name=var_train
+#SBATCH --job-name=var_train_a100
 #SBATCH --output=/gpfswork/rech/vcv/uyy89lr/logs/var_%j.out
 #SBATCH --error=/gpfswork/rech/vcv/uyy89lr/logs/var_%j.err
 #SBATCH --nodes=1
-#SBATCH --ntasks-per-node=4
+#SBATCH --ntasks-per-node=1
 #SBATCH --gres=gpu:4
 #SBATCH --cpus-per-task=8
 #SBATCH --time=20:00:00
 #SBATCH --partition=gpu_p5
 #SBATCH --account=vcv@a100
 #SBATCH --hint=nomultithread
-#SBATCH -C a100                 
+#SBATCH -C a100
 
-# --- Environnement ---
 module purge
-module load arch/a100         
+module load arch/a100
 module load pytorch-gpu/py3/2.2.0
 
 export PYTHONPATH=$HOME/var/src:$PYTHONPATH
-export TMPDIR=$SCRATCH/tmp
+export TMPDIR=$SCRATCH/tmp/$SLURM_JOB_ID
 export PYTHONUNBUFFERED=1
-mkdir -p $SCRATCH/tmp
+mkdir -p "$TMPDIR"
 
-# --- Chemins ---
 TOKENS=$SCRATCH/dataset/imagenet1k_256px/tokens
 TOKENIZER_CKPT=$WORK/checkpoints/tokenizer/vae_ch160v4096z32.pth
 CKPT_DIR=$WORK/checkpoints/var_train
 MASTER_PORT=$((29500 + SLURM_JOB_ID % 1000))
 
-mkdir -p $WORK/logs
-mkdir -p $CKPT_DIR
+mkdir -p "$CKPT_DIR"
 
-# --- Lancement ---
 cd $HOME/var
 
 srun torchrun \
@@ -50,12 +46,9 @@ srun torchrun \
     var.drop_path_rate=0.0333 \
     train.epochs=1000 \
     train.batch_size=256 \
-    train.num_workers=10 \
+    train.num_workers=4 \
     train.eval_batch_size=256 \
     train.grad_accum_steps=2 \
-    var.torch_compile=true \
-    ema.enabled=true \
-    ema.decay=0.9999 \
     logging.eval_every=1 \
     logging.save_every=10 \
     logging.sample_every=50 \

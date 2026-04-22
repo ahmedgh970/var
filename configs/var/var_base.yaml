@@ -1,13 +1,12 @@
 name: var_base
 vocab_size: 4096
-dim: 1024
-depth: 16
-num_heads: 16
+dim: 512
+depth: 8
+num_heads: 8
 mlp_ratio: 4.0
 dropout: 0.0
-drop_path_rate: 0.0666667
+drop_path_rate: 0.0333
 attn_l2_norm: true
-torch_compile: false
 init_head: 0.02
 init_std: -1.0
 init_adaln: 0.5

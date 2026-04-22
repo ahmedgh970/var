@@ -36,6 +36,8 @@ outputs/**
 !outputs/.gitkeep
 tests/**
 .claude/**
+CLAUDE.md
+.codex
 
 # Training artifacts
 checkpoints/**

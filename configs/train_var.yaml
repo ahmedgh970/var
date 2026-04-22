@@ -23,9 +23,6 @@ train:
   epochs: 200
   batch_size: 32
   grad_accum_steps: 1
-  progressive_ratio: 0.0
-  progressive_start_stage: 4
-  progressive_warmup_epochs: 0.0
   eval_batch_size: 32
   num_workers: 8
   pin_memory: true
@@ -55,18 +52,14 @@ scheduler:
 logging:
   eval_every: 1
   save_every: 10
-  sample_every: 5
+  sample_every: 50
   num_val_samples: 4
   early_stopping_patience: 0
   early_stopping_min_delta: 0.0
 
 # =========================
-# 5) EMA / sampling knobs
+# 5) Sampling knobs
 # =========================
-ema:
-  enabled: false
-  decay: 0.9999
-
 sampling:
   val_cfg_scale: 1.5
   val_temperature: 0.9

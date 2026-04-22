@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# CLI: CUDA_VISIBLE_DEVICES=1,2 NPROC_PER_NODE=2 ./scripts/train_var.sh
+
 set -euo pipefail
 
 NPROC_PER_NODE=${NPROC_PER_NODE:-1}
