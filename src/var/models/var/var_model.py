@@ -2,10 +2,35 @@ import math
 
 import torch
 import torch.nn as nn
+from omegaconf import DictConfig
 from .transformer import AdaLNBlock, AdaLNBeforeHead
 
 
 class VARModel(nn.Module):
+    @classmethod
+    def from_config(cls, cfg: DictConfig) -> "VARModel":
+        v = cfg.var
+        return cls(
+            vocab_size=v.vocab_size,
+            patch_nums=tuple(cfg.tokenizer.patch_nums),
+            cvae_dim=cfg.tokenizer.z_channels,
+            dim=v.dim,
+            depth=v.depth,
+            num_heads=v.num_heads,
+            mlp_ratio=v.mlp_ratio,
+            dropout=v.dropout,
+            drop_path_rate=v.drop_path_rate,
+            attn_l2_norm=v.attn_l2_norm,
+            num_classes=v.num_classes,
+            cond_drop_rate=v.cond_drop_rate,
+            label_smoothing=v.label_smoothing,
+            init_adaln=v.init_adaln,
+            init_adaln_gamma=v.init_adaln_gamma,
+            init_head=v.init_head,
+            init_std=v.init_std,
+        )
+
+
     def __init__(
         self,
         vocab_size: int = 4096,
@@ -66,6 +91,7 @@ class VARModel(nn.Module):
         )
         self.register_buffer("lvl_1l", lvl_1l)
 
+        # Causal mask: token i can attend to j only if they belong to the same scale or j is at a coarser scale (level[i] >= level[j])
         d = lvl_1l.view(1, self.seq_len, 1)
         attn_mask = (d >= d.transpose(1, 2)).view(1, 1, self.seq_len, self.seq_len)
         self.register_buffer("attn_mask", attn_mask)
@@ -181,37 +207,32 @@ class VARModel(nn.Module):
         ms_tokens: list[torch.Tensor],
         cond_blc_wo_first_l: torch.Tensor | None,
         class_labels: torch.Tensor,
-        prog_si: int = -1,
     ):
         cond_BD = self._get_cond(class_labels)
         flat_scales = [t.view(t.shape[0], -1) for t in ms_tokens]
         targets_cat = torch.cat(flat_scales, dim=1)
         b = targets_cat.shape[0]
-        ed = self.begin_ends[prog_si][1] if prog_si >= 0 else self.seq_len
 
         sos = (
             self.pos_start.expand(b, self.first_l, -1)
             + self.pos_embed[:, :self.first_l, :]
             + self.scale_embed(self.lvl_1l[:self.first_l]).unsqueeze(0)
         )
-        if ed == self.first_l:
+        if cond_blc_wo_first_l is None:
             h = sos
         else:
-            if cond_blc_wo_first_l is None:
-                raise ValueError("cond_blc_wo_first_l is required when more than one scale is used.")
-            cond_seq = cond_blc_wo_first_l[:, : ed - self.first_l, :]
             cond_h = (
-                self.word_embed(cond_seq.float())
-                + self.pos_embed[:, self.first_l:ed, :]
-                + self.scale_embed(self.lvl_1l[self.first_l:ed]).unsqueeze(0)
+                self.word_embed(cond_blc_wo_first_l.float())
+                + self.pos_embed[:, self.first_l:, :]
+                + self.scale_embed(self.lvl_1l[self.first_l:]).unsqueeze(0)
             )
             h = torch.cat([sos, cond_h], dim=1)
 
-        mask = self.attn_mask[:, :, :ed, :ed]
+        seq = h.shape[1]
+        mask = self.attn_mask[:, :, :seq, :seq]
         for blk in self.blocks:
             h = blk(h, cond_BD, attn_mask=mask)
         logits_cat = self.head(self.norm(h, cond_BD))
-        targets_cat = targets_cat[:, :ed]
         return logits_cat, targets_cat
 
     @torch.no_grad()

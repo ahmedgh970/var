@@ -1,5 +1,6 @@
 import torch
 import torch.nn as nn
+from omegaconf import DictConfig
 
 from .decoder import Decoder
 from .encoder import Encoder
@@ -8,6 +9,26 @@ from .quantizer import VectorQuantizer
 
 
 class VQVAE(nn.Module):
+    @classmethod
+    def from_config(cls, cfg: DictConfig) -> "VQVAE":
+        t = cfg.tokenizer
+        return cls(
+            vocab_size=t.vocab_size,
+            z_channels=t.z_channels,
+            ch=t.ch,
+            ch_mult=tuple(t.ch_mult),
+            num_res_blocks=t.num_res_blocks,
+            dropout=t.dropout,
+            beta=t.beta,
+            using_znorm=t.using_znorm,
+            patch_nums=tuple(t.patch_nums),
+            quantizer_type=t.quantizer_type,
+            quant_conv_ks=t.quant_conv_ks,
+            quant_resi=t.quant_resi,
+            share_quant_resi=t.share_quant_resi,
+            default_qresi_counts=t.default_qresi_counts,
+        )
+
     def __init__(
         self,
         vocab_size: int = 4096,
@@ -82,6 +103,11 @@ class VQVAE(nn.Module):
                 share_quant_resi=share_quant_resi,
                 default_qresi_counts=default_qresi_counts,
             )
+
+    @property
+    def codebook(self):
+        """Returns the VectorQuantizer regardless of quantizer type."""
+        return self.quantizer.quantizer if self.quantizer_type == "multi" else self.quantizer
 
     def encode_latent(self, x: torch.Tensor) -> torch.Tensor:
         return self.quant_conv(self.encoder(x))

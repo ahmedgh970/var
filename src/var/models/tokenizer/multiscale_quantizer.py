@@ -15,16 +15,8 @@ class Phi(nn.Conv2d):
         return h_bchw.mul(1.0 - self.resi_ratio) + super().forward(h_bchw).mul_(self.resi_ratio)
 
 
-class PhiShared(nn.Module):
-    def __init__(self, qresi: nn.Module):
-        super().__init__()
-        self.qresi = qresi
-
-    def __getitem__(self, _):
-        return self.qresi
-
-
-class PhiPartiallyShared(nn.Module):
+class PhiGroup(nn.Module):
+    """Holds k Phi modules and selects by position ratio in [0, 1]."""
     def __init__(self, qresi_ls: nn.ModuleList):
         super().__init__()
         self.qresi_ls = qresi_ls
@@ -37,20 +29,6 @@ class PhiPartiallyShared(nn.Module):
     def __getitem__(self, at_from_0_to_1: float):
         idx = int(torch.argmin(torch.abs(self.ticks - float(at_from_0_to_1))).item())
         return self.qresi_ls[idx]
-
-
-class PhiNonShared(nn.ModuleList):
-    def __init__(self, qresi_ls: list[nn.Module]):
-        super().__init__(qresi_ls)
-        k = len(qresi_ls)
-        if k == 4:
-            self.ticks = torch.linspace(1.0 / (3 * k), 1.0 - 1.0 / (3 * k), steps=k)
-        else:
-            self.ticks = torch.linspace(1.0 / (2 * k), 1.0 - 1.0 / (2 * k), steps=k)
-
-    def __getitem__(self, at_from_0_to_1: float):
-        idx = int(torch.argmin(torch.abs(self.ticks - float(at_from_0_to_1))).item())
-        return super().__getitem__(idx)
 
 
 class MultiScaleQuantizer(nn.Module):
@@ -74,18 +52,11 @@ class MultiScaleQuantizer(nn.Module):
             using_znorm=using_znorm,
         )
 
-        base_phi = (Phi(embed_dim, quant_resi) if abs(quant_resi) > 1e-6 else nn.Identity())
-        if share_quant_resi == 0:
-            n = default_qresi_counts or len(self.patch_nums)
-            self.quant_resi = PhiNonShared([base_phi if i == 0 else (Phi(embed_dim, quant_resi) if abs(quant_resi) > 1e-6 else nn.Identity()) for i in range(n)])
-        elif share_quant_resi == 1:
-            self.quant_resi = PhiShared(base_phi)
-        else:
-            self.quant_resi = PhiPartiallyShared(
-                nn.ModuleList(
-                    [base_phi if i == 0 else (Phi(embed_dim, quant_resi) if abs(quant_resi) > 1e-6 else nn.Identity()) for i in range(share_quant_resi)]
-                )
-            )
+        def _make_phi():
+            return Phi(embed_dim, quant_resi) if abs(quant_resi) > 1e-6 else nn.Identity()
+
+        n = share_quant_resi if share_quant_resi >= 1 else (default_qresi_counts or len(self.patch_nums))
+        self.quant_resi = PhiGroup(nn.ModuleList([_make_phi() for _ in range(n)]))
 
     def _phi(self, si: int, sn: int):
         ratio = 0.0 if sn <= 1 else si / float(sn - 1)
