@@ -42,7 +42,7 @@ def generate_token_indices(
 
     cond_BD = model.class_emb(labels_in)  # (eff_bs, dim)
 
-    cvae_dim = tokenizer.quantizer.quantizer.embed_dim if hasattr(tokenizer.quantizer, "quantizer") else tokenizer.quantizer.embed_dim
+    cvae_dim = tokenizer.codebook.embed_dim
     hw = model.patch_nums[-1]
     f_hat = torch.zeros((eff_bs, cvae_dim, hw, hw), device=device)
 
@@ -77,10 +77,7 @@ def generate_token_indices(
         if use_cfg:
             idx = idx.repeat(2, 1, 1)  # (2B, pn, pn)
 
-        if tokenizer.quantizer_type == "single":
-            h_bchw = tokenizer.quantizer.decode(idx)
-        else:
-            h_bchw = tokenizer.quantizer.quantizer.decode(idx)
+        h_bchw = tokenizer.codebook.decode(idx)
 
         f_hat, next_map = tokenizer.get_next_autoregressive_input(
             si=si, sn=len(model.patch_nums), f_hat=f_hat, h_bchw=h_bchw,

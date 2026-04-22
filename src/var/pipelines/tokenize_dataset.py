@@ -3,6 +3,7 @@ from pathlib import Path
 
 import hydra
 import torch
+from var.utils.seed import set_seed
 from hydra.core.hydra_config import HydraConfig
 from omegaconf import DictConfig
 from torch.utils.data import DataLoader
@@ -14,29 +15,7 @@ from var.models.tokenizer.checkpoint import load_tokenizer_checkpoint
 from var.models.tokenizer.vqvae import VQVAE
 
 
-def set_seed(seed: int):
-    torch.manual_seed(seed)
-    torch.cuda.manual_seed_all(seed)
 
-
-def build_model(cfg: DictConfig) -> VQVAE:
-    t = cfg.tokenizer
-    return VQVAE(
-        vocab_size=t.vocab_size,
-        z_channels=t.z_channels,
-        ch=t.ch,
-        ch_mult=tuple(t.ch_mult),
-        num_res_blocks=t.num_res_blocks,
-        dropout=t.dropout,
-        beta=t.beta,
-        using_znorm=t.using_znorm,
-        patch_nums=tuple(t.patch_nums),
-        quantizer_type=t.quantizer_type,
-        quant_conv_ks=t.quant_conv_ks,
-        quant_resi=float(t.get("quant_resi", 0.5)),
-        share_quant_resi=int(t.get("share_quant_resi", 4)),
-        default_qresi_counts=int(t.get("default_qresi_counts", 0)),
-    )
 
 
 def tokenize_split(
@@ -108,7 +87,7 @@ def main(cfg: DictConfig):
     run_dir = Path(HydraConfig.get().runtime.output_dir)
     run_dir.mkdir(parents=True, exist_ok=True)
 
-    model = build_model(cfg).to(device)
+    model = VQVAE.from_config(cfg).to(device)
     load_tokenizer_checkpoint(model, cfg.checkpoint_path)
     model.eval()
 

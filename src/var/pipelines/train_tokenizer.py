@@ -1,9 +1,10 @@
-import os
 from pathlib import Path
 
 import hydra
 import torch
 import torch.distributed as dist
+from var.utils.seed import set_seed
+from var.utils.distributed import init_distributed
 from hydra.core.hydra_config import HydraConfig
 from omegaconf import DictConfig
 from torch.nn.parallel import DistributedDataParallel as DDP
@@ -17,23 +18,7 @@ from var.training.schedulers import build_scheduler
 from var.training.tokenizer_trainer import TokenizerTrainer
 
 
-def set_seed(seed: int):
-    torch.manual_seed(seed)
-    torch.cuda.manual_seed_all(seed)
 
-
-def init_distributed(device_type: str):
-    world_size = int(os.environ.get("WORLD_SIZE", "1"))
-    rank = int(os.environ.get("RANK", "0"))
-    local_rank = int(os.environ.get("LOCAL_RANK", "0"))
-
-    use_ddp = world_size > 1
-    if use_ddp:
-        backend = "nccl" if device_type == "cuda" else "gloo"
-        dist.init_process_group(backend=backend)
-        if device_type == "cuda":
-            torch.cuda.set_device(local_rank)
-    return use_ddp, rank, local_rank, world_size
 
 
 def build_dataloaders(cfg: DictConfig, use_ddp: bool):
@@ -74,34 +59,13 @@ def build_dataloaders(cfg: DictConfig, use_ddp: bool):
     return train_loader, val_loader
 
 
-def build_model(cfg: DictConfig):
-    tokenizer_cfg = cfg.tokenizer
-
-    model = VQVAE(
-        vocab_size=tokenizer_cfg.vocab_size,
-        z_channels=tokenizer_cfg.z_channels,
-        ch=tokenizer_cfg.ch,
-        ch_mult=tuple(tokenizer_cfg.ch_mult),
-        num_res_blocks=tokenizer_cfg.num_res_blocks,
-        dropout=tokenizer_cfg.dropout,
-        beta=tokenizer_cfg.beta,
-        using_znorm=tokenizer_cfg.using_znorm,
-        patch_nums=tuple(tokenizer_cfg.patch_nums),
-        quantizer_type=tokenizer_cfg.quantizer_type,
-        quant_conv_ks=tokenizer_cfg.quant_conv_ks,
-        quant_resi=float(tokenizer_cfg.get("quant_resi", 0.5)),
-        share_quant_resi=int(tokenizer_cfg.get("share_quant_resi", 4)),
-        default_qresi_counts=int(tokenizer_cfg.get("default_qresi_counts", 0)),
-    )
-    return model
-
 
 @hydra.main(version_base=None, config_path="../../../configs", config_name="train_tokenizer")
 def main(cfg: DictConfig):
     requested_device = cfg.device
     if requested_device == "cuda" and not torch.cuda.is_available():
         requested_device = "cpu"
-    use_ddp, rank, local_rank, _ = init_distributed(requested_device)
+    use_ddp, rank, local_rank = init_distributed(requested_device)
     is_main_process = rank == 0
 
     set_seed(int(cfg.seed) + rank)
@@ -112,7 +76,7 @@ def main(cfg: DictConfig):
     log_file = ckpt_dir / "train.log"
 
     train_loader, val_loader = build_dataloaders(cfg, use_ddp=use_ddp)
-    model = build_model(cfg)
+    model = VQVAE.from_config(cfg)
 
     train_cfg = cfg.train
     device = requested_device

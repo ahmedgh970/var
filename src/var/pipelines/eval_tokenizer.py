@@ -2,26 +2,20 @@ from pathlib import Path
 
 import hydra
 import torch
+from var.utils.seed import set_seed
 from hydra.core.hydra_config import HydraConfig
 from omegaconf import DictConfig
 from PIL import Image
 from torch.cuda.amp import autocast
 from torch.utils.data import DataLoader
+from tqdm import tqdm
 
 from var.datasets.image_dataset import ImageDataset
 from var.datasets.transforms import build_val_transform
 from var.models.tokenizer.checkpoint import load_tokenizer_checkpoint
 from var.models.tokenizer.vqvae import VQVAE
+from var.inference.decode import denormalize_pm1_to_01
 from var.training.losses import reconstruction_loss
-
-
-def set_seed(seed: int):
-    torch.manual_seed(seed)
-    torch.cuda.manual_seed_all(seed)
-
-
-def denormalize_pm1_to_01(x: torch.Tensor) -> torch.Tensor:
-    return x.add(1.0).mul(0.5).clamp(0.0, 1.0)
 
 
 def save_side_by_side(inp: torch.Tensor, rec: torch.Tensor, save_path: Path):
@@ -30,27 +24,6 @@ def save_side_by_side(inp: torch.Tensor, rec: torch.Tensor, save_path: Path):
     side = torch.cat([inp, rec], dim=2)
     arr = (side.permute(1, 2, 0).numpy() * 255.0).astype("uint8")
     Image.fromarray(arr).save(save_path)
-
-
-def build_model(cfg: DictConfig) -> VQVAE:
-    tokenizer_cfg = cfg.tokenizer
-    model = VQVAE(
-        vocab_size=tokenizer_cfg.vocab_size,
-        z_channels=tokenizer_cfg.z_channels,
-        ch=tokenizer_cfg.ch,
-        ch_mult=tuple(tokenizer_cfg.ch_mult),
-        num_res_blocks=tokenizer_cfg.num_res_blocks,
-        dropout=tokenizer_cfg.dropout,
-        beta=tokenizer_cfg.beta,
-        using_znorm=tokenizer_cfg.using_znorm,
-        patch_nums=tuple(tokenizer_cfg.patch_nums),
-        quantizer_type=tokenizer_cfg.quantizer_type,
-        quant_conv_ks=tokenizer_cfg.quant_conv_ks,
-        quant_resi=float(tokenizer_cfg.get("quant_resi", 0.5)),
-        share_quant_resi=int(tokenizer_cfg.get("share_quant_resi", 4)),
-        default_qresi_counts=int(tokenizer_cfg.get("default_qresi_counts", 0)),
-    )
-    return model
 
 
 @hydra.main(version_base=None, config_path="../../../configs", config_name="eval_tokenizer")
@@ -80,10 +53,9 @@ def main(cfg: DictConfig):
         num_workers=cfg.num_workers,
         pin_memory=cfg.pin_memory,
         drop_last=False,
-
     )
 
-    model = build_model(cfg).to(device)
+    model = VQVAE.from_config(cfg).to(device)
     load_tokenizer_checkpoint(model, cfg.tokenizer.checkpoint_path)
     model.eval()
 
@@ -94,7 +66,7 @@ def main(cfg: DictConfig):
     saved = 0
 
     with torch.no_grad():
-        for batch in loader:
+        for batch in tqdm(loader, desc="eval", unit="batch"):
             images = batch.to(device, non_blocking=True)
             with autocast(enabled=bool(cfg.amp) and device.type == "cuda"):
                 recon, _, vq_loss = model(images)

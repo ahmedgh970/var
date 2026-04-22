@@ -1,9 +1,10 @@
-import os
 from pathlib import Path
 
 import hydra
 import torch
 import torch.distributed as dist
+from var.utils.seed import set_seed
+from var.utils.distributed import init_distributed
 from hydra.core.hydra_config import HydraConfig
 from omegaconf import DictConfig
 from torch.nn.parallel import DistributedDataParallel as DDP
@@ -17,32 +18,12 @@ from var.inference.generator import generate_token_indices
 from var.models.tokenizer.checkpoint import load_tokenizer_checkpoint
 from var.models.tokenizer.vqvae import VQVAE
 from var.models.var.var_model import VARModel
-from var.training.ema import ModelEMA
 from var.training.optim import build_optimizer
 from var.training.var_trainer import VARTrainer
 
 
-def set_seed(seed: int):
-    torch.manual_seed(seed)
-    torch.cuda.manual_seed_all(seed)
-
-
-def init_distributed(device_type: str):
-    world_size = int(os.environ.get("WORLD_SIZE", "1"))
-    rank = int(os.environ.get("RANK", "0"))
-    local_rank = int(os.environ.get("LOCAL_RANK", "0"))
-    use_ddp = world_size > 1
-
-    if use_ddp:
-        backend = "nccl" if device_type == "cuda" else "gloo"
-        dist.init_process_group(backend=backend)
-        if device_type == "cuda":
-            torch.cuda.set_device(local_rank)
-    return use_ddp, rank, local_rank
-
-
 def build_dataloaders(cfg: DictConfig, use_ddp: bool):
-    token_root = cfg.datasets.get("token_root", cfg.get("tokens_root", None))
+    token_root = cfg.datasets.get("token_root", None)
     if token_root is None:
         raise ValueError("Missing token root. Set `datasets.token_root` in dataset config.")
     datasets = build_token_datasets(token_root=token_root)
@@ -67,7 +48,7 @@ def build_dataloaders(cfg: DictConfig, use_ddp: bool):
         train_batch_sampler = InfiniteBatchSampler(
             dataset_len=len(train_set),
             batch_size=int(cfg.train.batch_size),
-            seed_for_all_rank=train_shuffle_seed,
+            seed_for_all_ranks=train_shuffle_seed,
             shuffle=True,
             fill_last=bool(cfg.train.drop_last),
         )
@@ -92,48 +73,6 @@ def build_dataloaders(cfg: DictConfig, use_ddp: bool):
     return train_loader, val_loader, steps_per_epoch
 
 
-def build_model(cfg: DictConfig):
-    var_cfg = cfg.var
-    return VARModel(
-        vocab_size=var_cfg.vocab_size,
-        patch_nums=tuple(cfg.tokenizer.patch_nums),
-        cvae_dim=cfg.tokenizer.z_channels,
-        dim=var_cfg.dim,
-        depth=var_cfg.depth,
-        num_heads=var_cfg.num_heads,
-        mlp_ratio=var_cfg.mlp_ratio,
-        dropout=var_cfg.dropout,
-        drop_path_rate=float(var_cfg.get("drop_path_rate", 0.0)),
-        attn_l2_norm=bool(var_cfg.get("attn_l2_norm", True)),
-        num_classes=int(var_cfg.get("num_classes", 1000)),
-        cond_drop_rate=float(var_cfg.get("cond_drop_rate", 0.1)),
-        label_smoothing=float(var_cfg.get("label_smoothing", 0.0)),
-        init_adaln=float(var_cfg.get("init_adaln", 0.5)),
-        init_adaln_gamma=float(var_cfg.get("init_adaln_gamma", 1.0e-5)),
-        init_head=float(var_cfg.get("init_head", 0.02)),
-        init_std=float(var_cfg.get("init_std", -1.0)),
-    )
-
-
-def build_tokenizer(cfg: DictConfig) -> VQVAE:
-    tok = cfg.tokenizer
-    return VQVAE(
-        vocab_size=tok.vocab_size,
-        z_channels=tok.z_channels,
-        ch=tok.ch,
-        ch_mult=tuple(tok.ch_mult),
-        num_res_blocks=tok.num_res_blocks,
-        dropout=tok.dropout,
-        beta=tok.beta,
-        using_znorm=tok.using_znorm,
-        patch_nums=tuple(tok.patch_nums),
-        quantizer_type=tok.quantizer_type,
-        quant_conv_ks=tok.quant_conv_ks,
-        quant_resi=float(tok.get("quant_resi", 0.5)),
-        share_quant_resi=int(tok.get("share_quant_resi", 4)),
-        default_qresi_counts=int(tok.get("default_qresi_counts", 0)),
-    )
-
 
 @hydra.main(version_base=None, config_path="../../../configs", config_name="train_var")
 def main(cfg: DictConfig):
@@ -150,27 +89,19 @@ def main(cfg: DictConfig):
     log_file = run_dir / "train.log"
 
     train_loader, val_loader, train_steps_per_epoch = build_dataloaders(cfg, use_ddp=use_ddp)
-    model = build_model(cfg)
-    tokenizer = None
-
+    model = VARModel.from_config(cfg)
     device = requested_device
     if device == "cuda":
         device = f"cuda:{local_rank}" if use_ddp else "cuda"
 
-    tokenizer_ckpt_path = cfg.tokenizer.get("checkpoint_path", cfg.get("tokenizer_checkpoint_path", None))
-    if not tokenizer_ckpt_path:
-        raise ValueError(
-            "Missing tokenizer checkpoint path. Set `tokenizer.checkpoint_path` in tokenizer config."
-        )
-    tokenizer = build_tokenizer(cfg).to(device)
+    tokenizer_ckpt_path = cfg.tokenizer.checkpoint_path
+    tokenizer = VQVAE.from_config(cfg).to(device)
     load_tokenizer_checkpoint(tokenizer, tokenizer_ckpt_path)
     tokenizer.eval()
     for p in tokenizer.parameters():
         p.requires_grad = False
 
     model = model.to(device)
-    if bool(cfg.var.get("torch_compile", False)) and hasattr(torch, "compile"):
-        model = torch.compile(model)
     if use_ddp:
         model = DDP(
             model,
@@ -196,11 +127,6 @@ def main(cfg: DictConfig):
         weight_decay=weight_decay,
         betas=betas,
     )
-    ema = None
-    ema_cfg = cfg.get("ema", {})
-    if bool(ema_cfg.get("enabled", False)) and is_main_process:
-        ema = ModelEMA(model, decay=float(ema_cfg.get("decay", 0.9999)))
-
     sample_fn = None
     if is_main_process and tokenizer is not None:
         _tok = tokenizer
@@ -242,13 +168,9 @@ def main(cfg: DictConfig):
         warmup_epochs=int(cfg.scheduler.get("warmup_epochs", 0)),
         final_lr_ratio=float(cfg.scheduler.get("final_lr_ratio", cfg.scheduler.get("min_lr_ratio", 0.1))),
         lr_warmup_start_ratio=float(cfg.scheduler.get("warmup_start_ratio", 0.005)),
-        progressive_ratio=float(train_cfg.get("progressive_ratio", 0.0)),
-        progressive_start_stage=int(train_cfg.get("progressive_start_stage", 0)),
-        progressive_warmup_epochs=float(train_cfg.get("progressive_warmup_epochs", 0.0)),
         save_dir=str(run_dir),
         log_file=str(log_file),
         is_main_process=is_main_process,
-        ema=ema,
         sample_fn=sample_fn,
         num_val_samples=int(logging_cfg.get("num_val_samples", train_cfg.get("num_val_samples", 8))),
     )
