@@ -5,7 +5,7 @@
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
 #SBATCH --gres=gpu:8
-#SBATCH --cpus-per-task=8
+#SBATCH --cpus-per-task=64
 #SBATCH --time=20:00:00
 #SBATCH --partition=gpu_p5
 #SBATCH --account=vcv@a100
@@ -47,7 +47,7 @@ srun torchrun \
     var.init_adaln_gamma=1.0e-3 \
     train.epochs=200 \
     train.batch_size=96 \
-    train.num_workers=8 \
+    train.num_workers=7 \
     train.eval_batch_size=144 \
     train.grad_accum_steps=1 \
     scheduler.final_lr_ratio=0.1 \

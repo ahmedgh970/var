@@ -5,7 +5,7 @@
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
 #SBATCH --gres=gpu:4
-#SBATCH --cpus-per-task=24
+#SBATCH --cpus-per-task=96
 #SBATCH --time=20:00:00
 #SBATCH --partition=gpu_p6
 #SBATCH --account=vcv@h100
