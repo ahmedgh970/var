@@ -4,7 +4,7 @@
 #SBATCH --error=/gpfswork/rech/vcv/uyy89lr/logs/var_%j.err
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
-#SBATCH --gres=gpu:4
+#SBATCH --gres=gpu:8
 #SBATCH --cpus-per-task=8
 #SBATCH --time=20:00:00
 #SBATCH --partition=gpu_p5
@@ -32,7 +32,7 @@ cd $HOME/var
 
 srun torchrun \
     --nnodes=1 \
-    --nproc_per_node=4 \
+    --nproc_per_node=8 \
     --rdzv_id=$SLURM_JOB_ID \
     --rdzv_backend=c10d \
     --rdzv_endpoint=$SLURMD_NODENAME:$MASTER_PORT \
@@ -40,16 +40,18 @@ srun torchrun \
     datasets.token_root=$TOKENS \
     tokenizer.checkpoint_path=$TOKENIZER_CKPT \
     checkpoint_dir=$CKPT_DIR \
-    var.depth=8 \
-    var.dim=512 \
-    var.num_heads=8 \
-    var.drop_path_rate=0.0333 \
-    train.epochs=1000 \
-    train.batch_size=256 \
-    train.num_workers=4 \
-    train.eval_batch_size=256 \
-    train.grad_accum_steps=2 \
-    logging.eval_every=1 \
+    var.depth=16 \
+    var.dim=1024 \
+    var.num_heads=16 \
+    var.drop_path_rate=0.0666667 \
+    var.init_adaln_gamma=1.0e-3 \
+    train.epochs=200 \
+    train.batch_size=96 \
+    train.num_workers=8 \
+    train.eval_batch_size=144 \
+    train.grad_accum_steps=1 \
+    scheduler.final_lr_ratio=0.1 \
+    logging.eval_every=10 \
     logging.save_every=10 \
     logging.sample_every=50 \
     logging.num_val_samples=3
